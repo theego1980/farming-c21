@@ -73,13 +73,17 @@ export const fechaLarga = d => new Date(d).toLocaleDateString('es-AR', {
 
 export const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+function logoUrl(boton) {
+  try { return boton && boton.href ? new URL(boton.href).origin + '/logo.png' : ''; } catch { return ''; }
+}
+
 // Plantilla de mail con la estética Inmopul (negro + dorado)
 export function plantilla(titulo, cuerpo, boton) {
   return `<!doctype html><html><body style="margin:0;background:#0B0B0C;padding:24px 12px;font-family:Arial,Helvetica,sans-serif;color:#EDEBE6">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center">
 <table role="presentation" width="100%" style="max-width:560px;background:#141415;border:1px solid #2A2824;border-radius:14px" cellspacing="0" cellpadding="0">
 <tr><td style="padding:22px 26px;border-bottom:1px solid #2A2824">
-<div style="font-size:11px;letter-spacing:3px;color:#BEAF87;font-weight:bold">CENTURY 21 INMOPUL · DEVOTO</div>
+${logoUrl(boton) ? `<img src="${logoUrl(boton)}" alt="Century 21 Inmopul" width="150" style="display:block;width:150px;height:auto;margin-bottom:12px">` : `<div style="font-size:11px;letter-spacing:3px;color:#BEAF87;font-weight:bold">CENTURY 21 INMOPUL · DEVOTO</div>`}
 <div style="font-size:22px;font-weight:bold;margin-top:6px;color:#FFFFFF">${titulo}</div></td></tr>
 <tr><td style="padding:22px 26px;font-size:15px;line-height:1.55;color:#D8D5CE">${cuerpo}
 ${boton ? `<div style="margin:26px 0 6px"><a href="${boton.href}" style="background:#BEAF87;color:#0B0B0C;text-decoration:none;font-weight:bold;padding:13px 22px;border-radius:8px;display:inline-block">${boton.texto}</a></div>` : ''}
@@ -89,7 +93,7 @@ ${boton ? `<div style="margin:26px 0 6px"><a href="${boton.href}" style="backgro
 }
 
 // Envío de mail: SMTP (casilla propia) o Resend, según lo que esté configurado
-export async function enviarMail({ to, subject, html, text, replyTo }) {
+export async function enviarMail({ to, cc, subject, html, text, replyTo }) {
   const from = env('MAIL_FROM') || env('SMTP_USER');
   if (env('SMTP_HOST')) {
     const port = Number(env('SMTP_PORT', '465'));
@@ -97,14 +101,14 @@ export async function enviarMail({ to, subject, html, text, replyTo }) {
       host: env('SMTP_HOST'), port, secure: port === 465,
       auth: { user: env('SMTP_USER'), pass: env('SMTP_PASS') },
     });
-    await t.sendMail({ from, to, subject, html, text, replyTo: replyTo || env('ADMIN_EMAIL') || undefined });
+    await t.sendMail({ from, to, cc: cc || undefined, subject, html, text, replyTo: replyTo || env('ADMIN_EMAIL') || undefined });
     return;
   }
   if (env('RESEND_API_KEY')) {
     const r = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${env('RESEND_API_KEY')}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to: [].concat(to), subject, html, text, reply_to: replyTo || env('ADMIN_EMAIL') || undefined }),
+      body: JSON.stringify({ from, to: [].concat(to), cc: cc ? [].concat(cc) : undefined, subject, html, text, reply_to: replyTo || env('ADMIN_EMAIL') || undefined }),
     });
     if (!r.ok) throw new Error('Resend: ' + (await r.text()));
     return;
