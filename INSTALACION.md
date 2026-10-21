@@ -85,6 +85,22 @@ Los mails salen desde tu casilla. Necesitás sus datos SMTP:
 3. Guardá la zona y asignala: nombre, apellido y correo del asesor. Le llega un mail con la zona, su usuario y una contraseña provisoria.
 4. Si el mail no llega, la pantalla te muestra los datos y un botón para mandárselos por **WhatsApp**.
 
+## Actualización v2 (si ya tenías la versión anterior instalada)
+
+1. Supabase → **SQL Editor → New snippet**: pegá todo el archivo `supabase/actualizacion-v2.sql` y tocá **Run**. Agrega los campos nuevos y habilita las fotos.
+2. Subí a GitHub el contenido de la carpeta como siempre (reemplaza los archivos).
+
+Si instalás desde cero, no hace falta: `esquema.sql` ya lo incluye.
+
+## Avisos automáticos (todos los días a las 8:00)
+
+| Aviso | A quién |
+|---|---|
+| Zona vencida / le quedan 7 días | Broker |
+| Le quedan 30 días: "dar vuelta la racha" | Asesor |
+| 7 días sin cargar casas ni jornadas (se repite cada semana) | Asesor, con copia al broker |
+| Contactos que quieren vender o están en venta con colegas: llamar cada 15 días | Asesor |
+
 ## Cómo funciona el plazo de 90 días
 
 - Cada asignación dura 90 días desde que la hacés. El asesor ve la cuenta regresiva en su panel.
