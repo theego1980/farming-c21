@@ -4,18 +4,19 @@ import { exigirAdmin, json, manejar, HttpError } from '../lib/comun.mjs';
 
 const USIG = 'https://ws.usig.buenosaires.gob.ar/geocoder/2.2/reversegeocoding';
 
+const errores = [];
 async function consultar([lat, lon]) {
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 9000);
   try {
     const r = await fetch(`${USIG}?x=${lon}&y=${lat}`, { signal: ctrl.signal });
-    if (!r.ok) return null;
+    if (!r.ok) { errores.push('HTTP ' + r.status); return null; }
     const t = (await r.text()).trim().replace(/^\(/, '').replace(/\);?$/, '');
     const d = JSON.parse(t);
     const m = String(d.puerta || '').match(/^(.*?)\s+(\d+)\s*$/);
     if (!m) return null;
     return { calle: m[1], altura: Number(m[2]), rango: d.calle_alturas || '' };
-  } catch { return null; }
+  } catch (e) { errores.push(e.name === 'AbortError' ? 'tiempo agotado' : e.message); return null; }
   finally { clearTimeout(to); }
 }
 
@@ -24,11 +25,12 @@ export default manejar(async (req) => {
   await exigirAdmin(req);
   const { puntos } = await req.json();
   if (!Array.isArray(puntos) || puntos.length > 500) throw new HttpError(400, 'Puntos inválidos');
+  errores.length = 0;
   const out = new Array(puntos.length).fill(null);
   let i = 0;
   const trabajador = async () => { while (i < puntos.length) { const k = i++; out[k] = await consultar(puntos[k]); } };
   await Promise.all(Array.from({ length: 8 }, trabajador));
-  return json(200, { resultados: out });
+  return json(200, { resultados: out, errores: [...new Set(errores)].slice(0, 3) });
 });
 
 export const config = { path: '/api/alturas' };
