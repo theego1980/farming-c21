@@ -1,0 +1,10 @@
+{
+  "name": "farming-c21-inmopul",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Plataforma de farming para el equipo de C21 Inmopul Devoto",
+  "dependencies": {
+    "nodemailer": "^6.9.14"
+  }
+}
