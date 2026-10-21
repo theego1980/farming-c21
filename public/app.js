@@ -370,12 +370,25 @@
       <div id="callesMsg"></div>
       <button class="btn primary block" style="margin-top:16px" data-a="trazarCalles">Trazar zona</button>
       <datalist id="dlCalles"></datalist>`);
-    const msg = $('#callesMsg');
-    if (!S.callejero) msg.innerHTML = '<div class="note" style="margin-top:12px">Descargando las calles de los tres barrios (sólo la primera vez, puede tardar unos segundos)…</div>';
+    prepararCallejero();
+  }
+  function prepararCallejero() {
+    const msg = $('#callesMsg'); if (!msg) return;
+    clearInterval(S.relojCalles);
+    if (!S.callejero) {
+      const t0 = Date.now();
+      const pinta = () => { const m = $('#callesMsg .note b'); if (m) m.textContent = Math.round((Date.now() - t0) / 1000) + ' s'; };
+      msg.innerHTML = '<div class="note" style="margin-top:12px">Descargando las calles de los tres barrios… <b>0 s</b><br><span style="font-size:12px">Sólo la primera vez. Puede tardar hasta un minuto; podés tocar “Trazar zona” igual y espera solo.</span></div>';
+      S.relojCalles = setInterval(pinta, 1000);
+    }
     cargarCallejero().then(c => {
+      clearInterval(S.relojCalles);
       const dl = $('#dlCalles'); if (dl) dl.innerHTML = c.names().map(n => `<option value="${esc(n)}">`).join('');
-      if (msg && msg.querySelector('.note')) msg.innerHTML = '';
-    }).catch(e => { if (msg) msg.innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+      const m = $('#callesMsg'); if (m && m.querySelector('.note')) m.innerHTML = `<div class="note" style="margin-top:12px">✓ ${c.names().length} calles listas.</div>`;
+    }).catch(e => {
+      clearInterval(S.relojCalles);
+      const m = $('#callesMsg'); if (m) m.innerHTML = `<div class="err">${esc(e.message)}</div><button class="btn sm" style="margin-top:8px" data-a="reintentarCalles">Reintentar</button>`;
+    });
   }
   const filaCalle = (i, v = '') => `<div class="street-in"><span class="n">${i + 1}</span><input class="i" list="dlCalles" placeholder="Calle" value="${esc(v)}" autocomplete="off"></div>`;
 
@@ -383,7 +396,9 @@
     const vals = [...document.querySelectorAll('#callesIn input')].map(i => i.value.trim()).filter(Boolean);
     const msg = $('#callesMsg'); msg.innerHTML = '';
     await conCarga(btn, async () => {
-      const c = await cargarCallejero();
+      let c;
+      try { c = await cargarCallejero(); }
+      catch (e) { msg.innerHTML = `<div class="err">${esc(e.message)}</div><button class="btn sm" style="margin-top:8px" data-a="reintentarCalles">Reintentar</button>`; return; }
       let r;
       try { r = c.zoneFromStreets(vals); } catch (e) { msg.innerHTML = `<div class="err">${esc(e.message)}</div>`; return; }
       nuevaZona(r.ring, r.calles, vals);
@@ -415,7 +430,10 @@
     if (choques.length) return;
     try {
       const [c, dirs] = await Promise.all([cargarCallejero(), Geo.loadDirecciones(ring)]);
-      const cuadras = c.cuadras(ring, dirs);
+      let cuadras = c.cuadras(ring, dirs);
+      if (!S.nueva || S.nueva.ring !== ring) return;
+      $('#zCuadras').innerHTML = `<b>${new Set(cuadras.map(q => q.calle)).size} calles · ${cuadras.length} cuadras</b><br><span style="font-size:12px">Buscando la numeración oficial de cada cuadra…</span>`;
+      cuadras = await numeracionOficial(cuadras);
       if (!S.nueva || S.nueva.ring !== ring) return;
       S.nueva.cuadras = cuadras;
       const calles = new Set(cuadras.map(q => q.calle));
@@ -426,6 +444,15 @@
     } catch (e) {
       $('#zCuadras').outerHTML = `<div class="err">${esc(e.message)}</div><button class="btn sm" style="margin-top:8px" data-a="reintentarCuadras">Reintentar</button>`;
     }
+  }
+
+  // Consulta la numeración oficial de la Ciudad (USIG) para cada cuadra
+  async function numeracionOficial(cuadras) {
+    try {
+      const res = await S.be.alturasOficiales(cuadras.map(q => Geo.midpoint(q.coords)));
+      if (!res) return cuadras;
+      return Geo.aplicarAlturasOficiales(cuadras, res).cuadras;
+    } catch (e) { console.warn(e); return cuadras; }
   }
 
   async function guardarZona(btn) {
@@ -524,7 +551,9 @@
       cargarFotos(el);
     } else if (S.tabZona === 'cuadras') {
       const porCalle = agrupar(z.cuadras || []);
-      el.innerHTML = `<p class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px">Si la numeración de una calle no es correcta, escribí la altura de su <b>primera cuadra</b> y tocá Aplicar. Con ⇅ invertís el sentido.</p>
+      const sinNum = (z.cuadras || []).filter(q => q.desde == null).length;
+      el.innerHTML = `${S.be.modo === 'supabase' ? `<button class="btn sm ${sinNum ? 'primary' : ''} block" style="margin-bottom:12px" data-a="numOficial">↻ Buscar numeración oficial${sinNum ? ` (${sinNum} cuadras sin altura)` : ''}</button>` : ''}
+        <p class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px">Si la numeración de una calle no es correcta, escribí la altura de su <b>primera cuadra</b> y tocá Aplicar. Con ⇅ invertís el sentido.</p>
         ${porCalle.map(([calle, qs]) => `<details class="calle"><summary>${esc(calle)}${qs.some(q => q.perimetral) ? '<span class="perim">LÍMITE</span>' : ''}<span class="cnt">${qs.length}</span></summary>
           <div style="padding:0 14px 12px"><div class="calib"><input class="i" type="number" step="100" placeholder="Ej: 3200" value="${qs[0].desde ?? ''}" data-calib="${esc(calle)}"><button class="btn sm" data-a="calibrar" data-calle="${esc(calle)}">Aplicar</button><button class="btn sm ghost" data-a="invertir" data-calle="${esc(calle)}" title="Invertir sentido">⇅</button></div>
           <table class="t">${qs.map(q => `<tr><td><b>${q.desde != null ? `${q.desde}–${q.hasta}` : `Cuadra ${q.orden}`}</b>${q.aprox ? ' <span class="muted">aprox.</span>' : ''}</td><td class="muted">${esc(entreTxt(q))}</td></tr>`).join('')}</table></div></details>`).join('')}`;
@@ -813,6 +842,7 @@
       case 'porCalles': if (S.dibujo) terminarDibujo(true); sheetPorCalles(); break;
       case 'masCalle': { const c = $('#callesIn'); c.insertAdjacentHTML('beforeend', filaCalle(c.children.length)); c.lastElementChild.querySelector('input').focus(); break; }
       case 'trazarCalles': trazarCalles(b); break;
+      case 'reintentarCalles': prepararCallejero(); break;
       case 'volverCalles': sheetPorCalles(S.nueva?.valoresCalles); limpiarCapa('preview'); break;
       case 'cancelarNueva': S.nueva = null; cerrarSheet(); break;
       case 'reintentarCuadras': if (S.nueva) nuevaZona(S.nueva.ring, S.nueva.calles_limite, S.nueva.valoresCalles); break;
@@ -841,6 +871,16 @@
         break;
       }
       case 'csv': { const z = zona(); const asg = asigZ(); if (z && asg) csv(z, asg); break; }
+      case 'numOficial': {
+        const z = zona();
+        await conCarga(b, async () => {
+          const cuadras = await numeracionOficial(JSON.parse(JSON.stringify(z.cuadras)));
+          const n = cuadras.filter(q => q.desde != null).length;
+          await S.be.guardarZona({ ...z, cuadras }); await recargar(); abrirZona(z.id);
+          toast(`${n} de ${cuadras.length} cuadras con numeración`);
+        });
+        break;
+      }
       case 'calibrar': case 'invertir': {
         const z = zona(); const calle = b.dataset.calle;
         const inp = [...document.querySelectorAll('[data-calib]')].find(i => i.dataset.calib === calle);

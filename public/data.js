@@ -68,6 +68,7 @@
     }
     asignar(zona_id, asesor) { return this.api('/api/asignar', { zona_id, asesor }); }
     resetAcceso(asesor_id) { return this.api('/api/acceso', { asesor_id }); }
+    async alturasOficiales(puntos) { return (await this.api('/api/alturas', { puntos })).resultados; }
     async renovar(a) {
       const { data, error } = await this.c.from('asignaciones').update({
         estado: 'activa', vence: new Date(Date.now() + 90 * DIA).toISOString(),
@@ -171,6 +172,7 @@
       this.d.asignaciones.push(a); this.save();
       return { asignacion: a, asesor: p, passTemporal, mail: { enviado: false, error: 'Modo demostración: no se envían mails.' } };
     }
+    async alturasOficiales() { return null; }
     async resetAcceso() { return { passTemporal: 'C21-demo-0000', mail: { enviado: false, error: 'Modo demostración: no se envían mails.' } }; }
     async renovar(a) { const x = this.d.asignaciones.find(y => y.id === a.id); Object.assign(x, { estado: 'activa', vence: new Date(Date.now() + 90 * DIA).toISOString(), renovaciones: (x.renovaciones || 0) + 1 }); this.save(); return x; }
     async subirFoto(blob) {

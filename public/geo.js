@@ -13,6 +13,7 @@
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
     'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+    'https://overpass.private.coffee/api/interpreter',
   ];
   const CACHE_DIAS = 30;
 
@@ -144,19 +145,26 @@
     },
   };
 
+  // Consulta los servidores de OpenStreetMap en paralelo y se queda con el primero que responde
   async function overpass(q, timeoutMs = 60000) {
-    let last;
-    for (const url of OVERPASS) {
-      try {
-        const ctrl = new AbortController();
-        const to = setTimeout(() => ctrl.abort(), timeoutMs);
-        const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrl.signal });
-        clearTimeout(to);
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        return await r.json();
-      } catch (e) { last = e; }
-    }
-    throw new Error('No pude consultar el mapa de calles (OpenStreetMap). Probá de nuevo en un minuto. ' + (last ? '(' + last.message + ')' : ''));
+    const ctrls = OVERPASS.map(() => new AbortController());
+    const to = setTimeout(() => ctrls.forEach(c => c.abort()), timeoutMs);
+    const intento = async (url, i) => {
+      const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctrls[i].signal });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const j = await r.json();
+      if (!j || !Array.isArray(j.elements)) throw new Error('respuesta inválida');
+      if (j.remark && /runtime error|timed out/i.test(j.remark) && !j.elements.length) throw new Error(j.remark);
+      return j;
+    };
+    try {
+      const j = await Promise.any(OVERPASS.map((u, i) => intento(u, i)));
+      ctrls.forEach(c => c.abort());
+      return j;
+    } catch (e) {
+      const det = e && e.errors ? e.errors.map(x => x.message).join(', ') : (e && e.message) || '';
+      throw new Error('No pude descargar el mapa de calles (los servidores de OpenStreetMap no respondieron). Probá de nuevo en un minuto.' + (det ? ` (${det})` : ''));
+    } finally { clearTimeout(to); }
   }
   const bb = b => `${b.s},${b.w},${b.n},${b.e}`;
 
@@ -446,7 +454,7 @@ out geom;`;
       // alturas conocidas por direcciones cercanas
       const ds = dirPorCalle.get(k) || [];
       cs.forEach(c => {
-        const nums = ds.filter(d => distPtLine(d.p, c.coords) < 45).map(d => d.n).sort((x, y) => x - y);
+        const nums = ds.filter(d => d.q ? d.q === c.id : distPtLine(d.p, c.coords) < 45).map(d => d.n).sort((x, y) => x - y);
         c._base = nums.length ? Math.floor(nums[Math.floor(nums.length / 2)] / 100) * 100 : null;
       });
       const known = cs.map((c, i) => ({ i, b: c._base })).filter(x => x.b != null);
@@ -454,6 +462,9 @@ out geom;`;
       if (known.length >= 2) {
         let s = 0; for (let i = 1; i < known.length; i++) s += Math.sign((known[i].b - known[i - 1].b) * (known[i].i - known[i - 1].i));
         dir = s >= 0 ? 1 : -1;
+      } else if (known.length === 1) {
+        // Convención de CABA: las calles este-oeste crecen hacia el oeste; las norte-sur, al norte de Rivadavia, crecen hacia el norte
+        dir = Math.abs(vx) >= Math.abs(vy) ? (vx < 0 ? 1 : -1) : (vy > 0 ? 1 : -1);
       }
       cs.forEach((c, i) => {
         let desde = c._base, aprox = false;
@@ -466,7 +477,7 @@ out geom;`;
       if (dir < 0) cs.reverse();
       cs.forEach((c, i) => {
         result.push({
-          id: 'q' + hash(k + '|' + c.mid[0].toFixed(4) + ',' + c.mid[1].toFixed(4)),
+          id: c.id || 'q' + hash(k + '|' + c.mid[0].toFixed(4) + ',' + c.mid[1].toFixed(4)),
           calle: c.calle,
           orden: i + 1,
           desde: c.desde,
@@ -493,6 +504,27 @@ out geom;`;
       c.aprox = false;
     });
     return cuadras;
+  }
+
+  // ¿El nombre de la ciudad (USIG, ej. "LAMARCA, EMILIO" o "BEIRO, FRANCISCO, AV.") es la misma calle que la de OSM?
+  function mismaCalle(osm, usig) {
+    const pal = t => norm(t).replace(/[^a-z0-9 ]/g, ' ').split(' ').filter(w => w.length > 2 && !['avenida', 'av', 'pje', 'pasaje', 'del', 'los', 'las', 'gral', 'general', 'dr', 'presidente', 'pres'].includes(w));
+    const a = new Set(pal(osm)), b = pal(usig.replace(/,/g, ' '));
+    if (!b.length || !a.size) return false;
+    const comunes = b.filter(w => a.has(w)).length;
+    return comunes >= Math.min(b.length, a.size, 2) || (comunes >= 1 && b.some(w => a.has(w) && w.length >= 5));
+  }
+
+  // Aplica la numeración oficial: resultados[i] corresponde a cuadras[i] (punto medio de la cuadra)
+  function aplicarAlturasOficiales(cuadras, resultados) {
+    const dirs = [];
+    let ok = 0;
+    cuadras.forEach((c, i) => {
+      const r = resultados[i];
+      if (r && r.altura && mismaCalle(c.calle, r.calle)) { dirs.push({ calle: c.calle, n: r.altura, q: c.id }); ok++; }
+    });
+    const internas = cuadras.map(c => ({ ...c, k: norm(c.calle), mid: midpoint(c.coords), desde: undefined }));
+    return { cuadras: asignarAlturas(internas, dirs), detectadas: ok };
   }
 
   function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
@@ -531,5 +563,6 @@ out center tags;`, 45000);
   root.Geo = {
     BBOX, BARRIOS, norm, pip, area, centroid, dist, distPtLine, overlapArea, bboxOf, closeRing,
     loadBarrios, loadCallejero, loadDirecciones, barrioDe, calibrarCalle, asignarAlturas, Callejero, assembleRings, midpoint,
+    mismaCalle, aplicarAlturasOficiales,
   };
 })(typeof window !== 'undefined' ? window : globalThis);
