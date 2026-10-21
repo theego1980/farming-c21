@@ -71,7 +71,7 @@
     async renovar(a) {
       const { data, error } = await this.c.from('asignaciones').update({
         estado: 'activa', vence: new Date(Date.now() + 90 * DIA).toISOString(),
-        renovaciones: (a.renovaciones || 0) + 1, alerta_enviada: false, aviso_previo: false,
+        renovaciones: (a.renovaciones || 0) + 1, alerta_enviada: false, aviso_previo: false, aviso_30: false,
       }).eq('id', a.id).select().single();
       if (error) throw error; return data;
     }
@@ -89,7 +89,28 @@
       const { data, error } = await this.c.from(tabla).update(row).eq('id', id).select().single();
       if (error) throw error; return data;
     }
-    async borrar(tabla, id) { const { error } = await this.c.from(tabla).delete().eq('id', id); if (error) throw error; }
+    async borrar(tabla, id) {
+      if (tabla === 'visitas') {
+        const { data } = await this.c.from('visitas').select('fotos').eq('id', id).maybeSingle();
+        if (data && data.fotos && data.fotos.length) await this.c.storage.from('fotos').remove(data.fotos);
+      }
+      const { error } = await this.c.from(tabla).delete().eq('id', id); if (error) throw error;
+    }
+    // Fotos: se guardan en la carpeta del asesor y se ven con enlaces temporales
+    async subirFoto(blob) {
+      const { data: { session } } = await this.c.auth.getSession();
+      const path = `${session.user.id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const { error } = await this.c.storage.from('fotos').upload(path, blob, { contentType: 'image/jpeg', upsert: false });
+      if (error) throw new Error('No se pudo subir la foto: ' + error.message);
+      return path;
+    }
+    async urlsFotos(paths) {
+      if (!paths.length) return {};
+      const { data, error } = await this.c.storage.from('fotos').createSignedUrls(paths, 3600);
+      if (error) return {};
+      const out = {}; (data || []).forEach(d => { if (d.signedUrl) out[d.path] = d.signedUrl; });
+      return out;
+    }
   }
 
   // ------------------------------------------------------------------
@@ -152,6 +173,11 @@
     }
     async resetAcceso() { return { passTemporal: 'C21-demo-0000', mail: { enviado: false, error: 'Modo demostración: no se envían mails.' } }; }
     async renovar(a) { const x = this.d.asignaciones.find(y => y.id === a.id); Object.assign(x, { estado: 'activa', vence: new Date(Date.now() + 90 * DIA).toISOString(), renovaciones: (x.renovaciones || 0) + 1 }); this.save(); return x; }
+    async subirFoto(blob) {
+      const url = await new Promise(res => { const r = new FileReader(); r.onload = () => res(r.result); r.readAsDataURL(blob); });
+      return url; // en la demo la foto queda guardada en el navegador
+    }
+    async urlsFotos(paths) { const o = {}; paths.forEach(p => o[p] = p); return o; }
     async liberar(a) { const x = this.d.asignaciones.find(y => y.id === a.id); Object.assign(x, { estado: 'finalizada', finalizada: new Date().toISOString(), motivo_fin: 'liberada' }); this.save(); return x; }
     async agregar(tabla, row) {
       const a = this.d.asignaciones.find(x => x.id === row.asignacion_id);

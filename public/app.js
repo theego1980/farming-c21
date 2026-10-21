@@ -5,7 +5,8 @@
   'use strict';
   const DIA = 864e5;
   const COLORES = ['#BEAF87', '#5B8DEF', '#E07A5F', '#81B29A', '#C38FD8', '#F2CC8F', '#4FB0C6', '#E76F9A', '#7FB069', '#B0A8E8', '#E9B44C', '#9AA0A6'];
-  const RESULTADOS = ['Contacto con propietario', 'Interesado en vender', 'Interesado en tasar', 'Volver a visitar', 'No atendió', 'Inquilino', 'No interesado'];
+  const RESULTADOS = ['Interesado en vender', 'No quiere vender', 'Interesado en tasar', 'Contacto con propietario', 'Volver a visitar', 'No atendió', 'Inquilino'];
+  const SEGUIR_CADA = 15; // días entre recordatorios de seguimiento
   const CENTRO = [-34.598, -58.505];
 
   const S = { be: null, yo: null, d: null, vista: 'mapa', filtro: 'todas', barrios: [], callejero: null, callejeroP: null,
@@ -19,6 +20,66 @@
   const fechaL = d => new Date(d).toLocaleDateString('es-AR', { day: 'numeric', month: 'long', year: 'numeric' });
   const nombre = p => p ? `${p.nombre} ${p.apellido}`.trim() || p.email : '—';
   const num = n => Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 1 });
+  const usd = n => n != null && n !== '' ? 'USD ' + Number(n).toLocaleString('es-AR', { maximumFractionDigits: 0 }) : '';
+  const diasDesde = d => d.length === 10
+    ? Math.round((new Date(hoyISO() + 'T12:00:00') - new Date(d + 'T12:00:00')) / DIA)
+    : Math.floor((Date.now() - new Date(d).getTime()) / DIA);
+  const enSeguimiento = v => v.resultado === 'Interesado en vender' || !!v.en_venta_colega;
+  function tiempoVenta(desde) {
+    const d = Math.max(0, diasDesde(desde));
+    if (d < 31) return `${d} ${d === 1 ? 'día' : 'días'}`;
+    const m = Math.floor((d + 1) / 30.44), r = Math.max(0, Math.round(d - m * 30.44));
+    if (m < 12) return `${m} ${m === 1 ? 'mes' : 'meses'}${r >= 5 ? ` y ${r} días` : ''}`;
+    const a = Math.floor(m / 12), mm = m % 12;
+    return `${a} ${a === 1 ? 'año' : 'años'}${mm ? ` y ${mm} ${mm === 1 ? 'mes' : 'meses'}` : ''}`;
+  }
+  function proximoContacto(v) {
+    const base = [v.fecha, v.ultimo_contacto].filter(Boolean).sort().pop();
+    return SEGUIR_CADA - diasDesde(base);
+  }
+
+  const pendientes = vs => vs.filter(v => enSeguimiento(v) && proximoContacto(v) <= 0)
+    .sort((a, b) => proximoContacto(a) - proximoContacto(b));
+  function tituloPestana(n) { document.title = (n ? `(${n}) ` : '') + 'Farming · C21 Inmopul'; }
+
+  // Tarjeta de una casa visitada (la usan el broker y el asesor)
+  function tarjetaVisita(v, { calle, puede, extra = '' } = {}) {
+    const prox = enSeguimiento(v) ? proximoContacto(v) : null;
+    return `<div class="vis">
+      <div class="h"><b>${esc(calle || v.calle)} ${v.altura ?? 's/n'}</b><span class="muted" style="font-size:12px">${fecha(v.fecha)}</span>${puede ? `<button class="x" data-a="delVisita" data-id="${v.id}" title="Borrar">✕</button>` : ''}</div>
+      ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}
+      ${v.resultado ? `<div class="r">${esc(v.resultado)}</div>` : ''}
+      ${v.en_venta_colega ? `<div class="colega"><div>En venta con <b>${esc(v.venta_inmobiliaria || 'otra inmobiliaria')}</b>${v.venta_valor ? ` · <b>${usd(v.venta_valor)}</b>` : ''}</div>
+        ${v.venta_desde ? `<div class="reloj">⏱ Lleva <b>${tiempoVenta(v.venta_desde)}</b> a la venta <span class="muted">(desde ${fechaL(v.venta_desde + 'T12:00:00')})</span></div>` : ''}</div>` : ''}
+      ${v.notas ? `<div class="muted" style="font-size:13px">${esc(v.notas)}</div>` : ''}
+      ${(v.fotos || []).length ? `<div class="fotos">${v.fotos.map(f => `<img data-foto="${esc(f)}" alt="Foto de la casa">`).join('')}</div>` : ''}
+      ${prox != null ? `<div class="seg ${prox <= 0 ? 'hoy' : ''}"><span>${prox <= 0 ? '☎ Toca llamar' : `☎ Próximo llamado en ${prox} ${prox === 1 ? 'día' : 'días'}`}${v.ultimo_contacto ? ` · últ. contacto ${fecha(v.ultimo_contacto)}` : ''}</span>
+        ${puede ? `<button class="btn sm" data-a="contactado" data-id="${v.id}">✓ Contactado</button>` : ''}</div>` : ''}
+      ${extra}</div>`;
+  }
+
+  // Fotos: se piden los enlaces después de dibujar la pantalla
+  const fotoCache = new Map();
+  async function cargarFotos(root = document) {
+    const imgs = [...root.querySelectorAll('img[data-foto]')];
+    if (!imgs.length) return;
+    const faltan = [...new Set(imgs.map(i => i.dataset.foto))].filter(p => !fotoCache.has(p) || fotoCache.get(p).t < Date.now() - 50 * 60e3);
+    if (faltan.length) {
+      const urls = await S.be.urlsFotos(faltan).catch(() => ({}));
+      Object.entries(urls).forEach(([p, u]) => fotoCache.set(p, { u, t: Date.now() }));
+    }
+    imgs.forEach(i => { const c = fotoCache.get(i.dataset.foto); if (c) i.src = c.u; });
+  }
+  // Achica la foto antes de subirla (máx. 1280 px, JPG)
+  async function comprimir(file) {
+    const max = S.be.modo === 'demo' ? 640 : 1280;
+    const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('No se pudo leer la foto')); i.src = URL.createObjectURL(file); });
+    const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
+    c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+    URL.revokeObjectURL(img.src);
+    return await new Promise(res => c.toBlob(res, 'image/jpeg', S.be.modo === 'demo' ? 0.6 : 0.75));
+  }
 
   function toast(msg, bad) {
     const t = $('#toast'); t.textContent = msg; t.className = 'toast show' + (bad ? ' bad' : '');
@@ -103,9 +164,11 @@
 
   function pantallaLogin(err) {
     document.body.classList.remove('has-nav');
+    tituloPestana(0);
     const demo = S.be.modo === 'demo';
     let html = `<div class="login"><div class="card">
-      <div class="brand"><div class="logo">C21</div><div><b>INMOPUL · DEVOTO</b><small>Programa de Farming</small></div></div>
+      <img src="logo.png" alt="Century 21 Inmopul" class="login-logo">
+      <p class="serif gold" style="margin:6px 0 0;font-size:15px">Programa de Farming · Devoto</p>
       <h1>Ingresar</h1><p class="muted" style="margin:0 0 6px">Zonas de prospección del equipo.</p>`;
     if (demo) {
       const ases = S.be.d.perfiles.filter(p => p.rol !== 'admin');
@@ -138,7 +201,7 @@
   }
 
   function topbar(navHtml) {
-    return `<header class="top"><div class="brand"><div class="logo">C21</div><div><b>Farming</b><small>Inmopul · Devoto</small></div>
+    return `<header class="top"><div class="brand"><img src="logo.png" alt="C21 Inmopul" class="brand-logo"><span class="brand-sep"></span><div><b>Farming</b><small>Devoto</small></div>
       ${S.be.modo === 'demo' ? '<span class="chip-demo">DEMO</span>' : ''}</div>
       ${navHtml || '<div style="margin-left:auto"></div>'}
       <button class="iconbtn" data-a="cuenta" title="Mi cuenta"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></button></header>`;
@@ -159,9 +222,13 @@
   function renderAdmin() {
     document.body.classList.add('has-nav');
     const nv = vencidas().length;
+    const actIds = new Set(S.d.asignaciones.filter(a => estadoAsig(a) === 'activa').map(a => a.id));
+    const np = pendientes(S.d.visitas.filter(v => actIds.has(v.asignacion_id))).length;
+    tituloPestana(nv + np);
     const nav = `<nav class="nav">
       <button class="${S.vista === 'mapa' ? 'on' : ''}" data-v="mapa">Mapa</button>
       <button class="${S.vista === 'zonas' ? 'on' : ''}" data-v="zonas">Zonas${nv ? `<span class="dot">${nv}</span>` : ''}</button>
+      <button class="${S.vista === 'oport' ? 'on' : ''}" data-v="oport">Oportunidades${np ? `<span class="dot warn">${np}</span>` : ''}</button>
       <button class="${S.vista === 'asesores' ? 'on' : ''}" data-v="asesores">Asesores</button></nav>`;
     if (S.vista === 'mapa') {
       if (!S.map || !document.getElementById('map')) {
@@ -175,8 +242,16 @@
     } else {
       destruirMapa();
       $('#app').innerHTML = topbar(nav) + `<main><div class="wrap" id="vista"></div></main>`;
-      S.vista === 'zonas' ? vistaZonas() : vistaAsesores();
+      S.vista === 'zonas' ? vistaZonas() : S.vista === 'oport' ? vistaOportunidades() : vistaAsesores();
     }
+  }
+
+  // Mapa base de OpenStreetMap (gratuito, sin clave)
+  function capaMapa() {
+    return L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    });
   }
 
   function destruirMapa() { if (S.map) { S.map.remove(); S.map = null; S.capas = {}; } }
@@ -185,10 +260,7 @@
   function crearMapa(el = 'map') {
     const map = L.map(el, { zoomControl: false, minZoom: 12, maxZoom: 19 }).setView(CENTRO, 14);
     L.control.zoom({ position: 'bottomright' }).addTo(map);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19, subdomains: 'abcd',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-    }).addTo(map);
+    capaMapa().addTo(map);
     S.map = map; S.capas = {}; dibujarZonas._fit = false;
     cargarBarrios();
     return map;
@@ -448,10 +520,8 @@
       el.innerHTML = `<h3 style="font-size:14px;margin:4px 0 8px">Jornadas</h3>
         <div class="card" style="padding:8px 14px">${jor.length ? jor.map(j => `<div class="jor"><b>${num(j.horas)} h</b><span>${fecha(j.fecha)}</span><span class="grow">${esc(j.notas)}</span></div>`).join('') : '<p class="muted" style="font-size:13px">Todavía no registró jornadas.</p>'}</div>
         <div class="row" style="margin:18px 0 8px;justify-content:space-between"><h3 style="font-size:14px">Casas visitadas (${vis.length})</h3>${vis.length ? '<button class="btn sm" data-a="csv">Exportar CSV</button>' : ''}</div>
-        ${vis.length ? vis.map(v => { const q = qmap.get(v.cuadra_id); return `<div class="vis"><div class="h"><b>${esc(v.calle)} ${v.altura ?? ''}</b><span class="muted" style="font-size:12px">${fecha(v.fecha)}</span></div>
-          ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}
-          ${v.resultado ? `<div class="r">${esc(v.resultado)}</div>` : ''}${v.notas ? `<div class="muted" style="font-size:13px">${esc(v.notas)}</div>` : ''}
-          ${q ? `<div class="muted" style="font-size:11px">${esc(entreTxt(q))}</div>` : ''}</div>`; }).join('') : '<p class="muted" style="font-size:13px">Todavía no cargó casas.</p>'}`;
+        ${vis.length ? vis.map(v => { const q = qmap.get(v.cuadra_id); return tarjetaVisita(v, { extra: q ? `<div class="muted" style="font-size:11px">${esc(entreTxt(q))}</div>` : '' }); }).join('') : '<p class="muted" style="font-size:13px">Todavía no cargó casas.</p>'}`;
+      cargarFotos(el);
     } else if (S.tabZona === 'cuadras') {
       const porCalle = agrupar(z.cuadras || []);
       el.innerHTML = `<p class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px">Si la numeración de una calle no es correcta, escribí la altura de su <b>primera cuadra</b> y tocá Aplicar. Con ⇅ invertís el sentido.</p>
@@ -515,9 +585,9 @@
   function csv(z, a) {
     const st = stats([a.id]);
     const qmap = new Map((z.cuadras || []).map(q => [q.id, q]));
-    const filas = [['Fecha', 'Calle', 'Altura', 'Propietario', 'Teléfono', 'Resultado', 'Notas', 'Cuadra', 'Asesor']];
+    const filas = [['Fecha', 'Calle', 'Altura', 'Propietario', 'Teléfono', 'Resultado', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Notas', 'Cuadra', 'Asesor']];
     const as = nombre(perfil(a.asesor_id));
-    st.v.forEach(v => { const q = qmap.get(v.cuadra_id); filas.push([v.fecha, v.calle, v.altura ?? '', v.propietario, v.telefono, v.resultado, v.notas, q ? entreTxt(q) : '', as]); });
+    st.v.forEach(v => { const q = qmap.get(v.cuadra_id); filas.push([v.fecha, v.calle, v.altura ?? '', v.propietario, v.telefono, v.resultado, v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', v.notas, q ? entreTxt(q) : '', as]); });
     const txt = '﻿' + filas.map(f => f.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const blob = new Blob([txt], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `farming-${z.nombre.replace(/[^\w]+/g, '-')}.csv`; link.click();
@@ -539,6 +609,23 @@
         ${st ? `<div class="m"><span>🏠 ${st.visitas} casas</span><span>☎ ${st.contactos}</span><span>⏱ ${num(st.horas)} h</span><span>${st.ultima ? 'Últ. ' + fecha(st.ultima) : 'Sin movimiento'}</span></div>` : ''}
         ${e === 'vencida' ? '<div class="row"><button class="btn sm primary" data-a="renovarZ" data-z="' + z.id + '">Renovar 90 días</button><button class="btn sm" data-a="asignarZ" data-z="' + z.id + '">Asignar a otro</button></div>' : ''}
       </div>`; }).join('') : `<div class="empty"><b>${S.d.zonas.length ? 'No hay zonas con este filtro' : 'Todavía no hay zonas'}</b>${S.d.zonas.length ? '' : 'Andá al mapa para crear la primera.'}</div>`}</div>`;
+  }
+
+  // ---------- Vista: oportunidades ----------
+  function vistaOportunidades() {
+    const el = $('#vista');
+    const f = S.filtroOp || 'colega';
+    const zonaDe = v => { const a = S.d.asignaciones.find(x => x.id === v.asignacion_id); return { a, z: a ? S.d.zonas.find(z => z.id === a.zona_id) : null }; };
+    let lista = S.d.visitas.filter(v => f === 'colega' ? v.en_venta_colega : f === 'vender' ? v.resultado === 'Interesado en vender' : f === 'tasar' ? v.resultado === 'Interesado en tasar' : (enSeguimiento(v) && proximoContacto(v) <= 0));
+    if (f === 'colega') lista.sort((a, b) => (a.venta_desde || '9').localeCompare(b.venta_desde || '9'));
+    else lista.sort((a, b) => (b.creado || '').localeCompare(a.creado || ''));
+    const c = k => S.d.visitas.filter(v => k === 'colega' ? v.en_venta_colega : k === 'vender' ? v.resultado === 'Interesado en vender' : k === 'tasar' ? v.resultado === 'Interesado en tasar' : (enSeguimiento(v) && proximoContacto(v) <= 0)).length;
+    el.innerHTML = `<h2>Oportunidades</h2>
+      <p class="muted" style="font-size:14px;margin:6px 0 0">Las casas en venta con colegas aparecen primero las que llevan más tiempo en el mercado.</p>
+      <div class="filters">${[['colega', 'En venta con colegas'], ['vender', 'Quieren vender'], ['tasar', 'Quieren tasar'], ['atrasados', 'Llamados pendientes']].map(([k, t]) => `<button class="${f === k ? 'on' : ''}" data-fop="${k}">${t} (${c(k)})</button>`).join('')}</div>
+      ${lista.length ? `<div class="zl">${lista.map(v => { const { a, z } = zonaDe(v); return tarjetaVisita(v, { extra: `<div class="muted" style="font-size:12px;margin-top:2px">${z ? `<a href="#" data-zona="${z.id}">${esc(z.nombre)}</a> · ` : ''}${esc(nombre(perfil(v.asesor_id)))}</div>` }); }).join('')}</div>`
+        : '<div class="empty"><b>Nada por acá todavía</b>A medida que los asesores carguen casas, van a aparecer.</div>'}`;
+    cargarFotos(el);
   }
 
   // ---------- Vista: asesores ----------
@@ -576,8 +663,19 @@
     const st = stats([a.id]);
     const puede = e === 'activa';
     const jor = st.j.slice().sort((x, y) => y.fecha.localeCompare(x.fecha) || (y.creado || '').localeCompare(x.creado || ''));
+    const pend = puede ? pendientes(st.v) : [];
+    const vigIds = new Set(vig.filter(x => estadoAsig(x) === 'activa').map(x => x.id));
+    tituloPestana(pendientes(S.d.visitas.filter(v => vigIds.has(v.asignacion_id))).length);
+    const banner = pend.length ? `<div class="alerta-llamar ${S.verPend ? 'abierta' : ''}">
+      <button class="al-h" data-a="togglePend"><span class="al-ic">☎</span><span class="grow"><b>${pend.length === 1 ? 'Tenés 1 contacto para llamar' : `Tenés ${pend.length} contactos para llamar`}</b><small>${S.verPend ? 'Tocá para ocultar' : 'Tocá para ver la lista'}</small></span><span class="al-n">${pend.length}</span></button>
+      ${S.verPend ? `<div class="al-lista">${pend.map(v => { const atraso = -proximoContacto(v); return `<div class="al-item">
+        <div class="grow"><b>${esc(v.propietario || 'Propietario')}</b> <span class="muted">· ${esc(v.calle)} ${v.altura ?? ''}</span>
+          <div style="font-size:12px;color:var(--tx2)">${v.en_venta_colega ? `En venta con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ' · lleva ' + tiempoVenta(v.venta_desde) : ''}` : esc(v.resultado)}${atraso > 0 ? ` · <span style="color:var(--warn)">${atraso} ${atraso === 1 ? 'día' : 'días'} de atraso</span>` : ''}</div></div>
+        <div class="al-acc">${v.telefono ? `<a class="btn sm" href="tel:${esc(v.telefono)}">📞 Llamar</a>` : ''}<button class="btn sm primary" data-a="contactado" data-id="${v.id}">✓ Contactado</button></div></div>`; }).join('')}</div>` : ''}
+    </div>` : '';
     $('#app').innerHTML = topbar() + `<main><div class="wrap">
       ${vig.length > 1 ? `<div class="filters">${vig.map(x => `<button class="${x.id === a.id ? 'on' : ''}" data-asig="${x.id}">${esc(S.d.zonas.find(z => z.id === x.zona_id)?.nombre || 'Zona')}</button>`).join('')}</div>` : ''}
+      ${banner}
       <div class="card">
         <div class="muted" style="font-size:12px;font-weight:700;letter-spacing:1px">TU ZONA</div>
         <h2 style="font-size:24px;margin-top:2px">${esc(z.nombre)}</h2>${z.barrio ? `<div class="serif gold">${esc(z.barrio)}</div>` : ''}
@@ -614,7 +712,7 @@
     if (S.mini) { S.mini.remove(); S.mini = null; }
     const el = $('#miniMap'); if (!el) return;
     const m = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 19 });
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19, subdomains: 'abcd', attribution: '&copy; OpenStreetMap &copy; CARTO' }).addTo(m);
+    capaMapa().addTo(m);
     const ring = z.geometria.coordinates[0].map(c => [c[1], c[0]]);
     const pol = L.polygon(ring, { color: z.color, weight: 2, fillOpacity: .12 }).addTo(m);
     m.fitBounds(pol.getBounds(), { padding: [10, 10] });
@@ -635,16 +733,27 @@
       return `<details class="calle" data-calle="${esc(calle)}" ${S.abiertas.has(calle) ? 'open' : ''}><summary>${esc(calle)}${qs.some(x => x.perimetral) ? '<span class="perim">LÍMITE</span>' : ''}<span class="cnt ${n ? 'on' : ''}">${n}</span></summary>
         ${qs.map(cq => { const vs = (porCuadra.get(cq.id) || []).slice().sort((x, y) => (x.altura || 0) - (y.altura || 0)); return `<div class="cuadra ${S.cuadraAbierta === cq.id ? 'open' : ''}" id="c_${cq.id}">
           <div class="cuadra-h" data-cuadra="${cq.id}"><div class="tt"><b>${cq.desde != null ? `${cq.desde} – ${cq.hasta}` : `Cuadra ${cq.orden}`}${cq.aprox ? ' <small>aprox.</small>' : ''}</b><small>${esc(entreTxt(cq))}</small></div><span class="cnt ${vs.length ? 'on' : ''}">${vs.length}</span></div>
-          <div class="cuadra-b">${vs.map(v => `<div class="vis"><div class="h"><b>${esc(cq.calle)} ${v.altura ?? 's/n'}</b><span class="muted" style="font-size:12px">${fecha(v.fecha)}</span>${puede ? `<button class="x" data-a="delVisita" data-id="${v.id}" title="Borrar">✕</button>` : ''}</div>
-              ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}${v.resultado ? `<div class="r">${esc(v.resultado)}</div>` : ''}${v.notas ? `<div class="muted" style="font-size:13px">${esc(v.notas)}</div>` : ''}</div>`).join('')}
+          <div class="cuadra-b">${vs.map(v => tarjetaVisita(v, { calle: cq.calle, puede })).join('')}
             ${puede ? `<div class="vform" data-form="${cq.id}"><div class="grid2"><div><label class="f" style="margin-top:0">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" placeholder="${cq.desde != null ? cq.desde + '…' + cq.hasta : 'Número'}"></div>
               <div><label class="f" style="margin-top:0">Resultado</label><select class="i" name="resultado"><option value="">—</option>${RESULTADOS.map(r => `<option>${r}</option>`).join('')}</select></div></div>
               <label class="f">Propietario</label><input class="i" name="propietario" placeholder="Nombre y apellido" autocomplete="off">
               <label class="f">Teléfono</label><input class="i" name="telefono" type="tel" inputmode="tel" autocomplete="off">
+              <label class="f">¿En venta con colega?</label>
+              <div class="sino"><label><input type="radio" name="colega_${cq.id}" value="no" data-colega checked><span>No</span></label><label><input type="radio" name="colega_${cq.id}" value="si" data-colega><span>Sí</span></label></div>
+              <div class="colega-campos hidden">
+                <label class="f">¿Hace cuánto está a la venta?</label>
+                <div class="row" style="flex-wrap:nowrap"><input class="i" name="venta_cant" type="number" min="0" inputmode="numeric" placeholder="Ej: 4" style="flex:1"><select class="i" name="venta_unidad" style="flex:1"><option value="30.44">meses</option><option value="1">días</option><option value="365.25">años</option></select></div>
+                <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" placeholder="Ej: Remax Devoto" autocomplete="off">
+                <label class="f">Valor publicado (USD)</label><input class="i" name="venta_valor" type="number" min="0" inputmode="numeric" placeholder="Ej: 185000">
+              </div>
               <label class="f">Notas</label><input class="i" name="notas" placeholder="Ej: PH al fondo, vende en 2027" autocomplete="off">
+              <label class="f">Fotos (hasta 3)</label>
+              <label class="btn sm fotobtn">📷 Agregar fotos<input type="file" accept="image/*" multiple data-fotos hidden></label>
+              <div class="fotos prev" data-prev></div>
               <button class="btn primary block" style="margin-top:12px" data-a="addVisita" data-q="${cq.id}">Guardar casa</button></div>` : ''}</div></div>`; }).join('')}</details>`;
     }).join('') : '<p class="empty">No hay calles que coincidan.</p>';
     el.querySelectorAll('details.calle').forEach(d => d.addEventListener('toggle', () => { d.open ? S.abiertas.add(d.dataset.calle) : S.abiertas.delete(d.dataset.calle); }));
+    cargarFotos(el);
   }
 
   function irACuadra(qid) {
@@ -669,11 +778,13 @@
     const t = e.target;
     const v = t.closest('[data-v]'); if (v) { if (S.dibujo) terminarDibujo(true); cerrarSheet(); S.vista = v.dataset.v; renderAdmin(); return; }
     const f = t.closest('[data-f]'); if (f) { S.filtro = f.dataset.f; vistaZonas(); return; }
+    const fop = t.closest('[data-fop]'); if (fop) { S.filtroOp = fop.dataset.fop; vistaOportunidades(); return; }
     const tab = t.closest('[data-tab]'); if (tab) { S.tabZona = tab.dataset.tab; abrirZona(S.zonaAbierta); return; }
     const as = t.closest('[data-asig]'); if (as) { S.asigSel = as.dataset.asig; S.abiertas.clear(); S.cuadraAbierta = null; renderAsesor(); return; }
     const cq = t.closest('[data-cuadra]'); if (cq) { const id = cq.dataset.cuadra; S.cuadraAbierta = S.cuadraAbierta === id ? null : id; document.querySelectorAll('.cuadra.open').forEach(x => x.classList.remove('open')); if (S.cuadraAbierta) document.getElementById('c_' + id)?.classList.add('open'); return; }
     const sw = t.closest('[data-color]'); if (sw && S.nueva) { S.nueva.color = sw.dataset.color; document.querySelectorAll('#zColores [data-color]').forEach(b => b.style.borderColor = b === sw ? '#fff' : 'transparent'); if (S.capas.preview) S.capas.preview.setStyle({ color: S.nueva.color }); return; }
     const zc = t.closest('[data-zona]'); if (zc && !t.closest('[data-a]')) {
+      e.preventDefault();
       const id = zc.dataset.zona;
       if (S.vista !== 'mapa') { S.vista = 'mapa'; renderAdmin(); }
       setTimeout(() => abrirZona(id), 60); return;
@@ -765,17 +876,57 @@
         const val = n => form.querySelector(`[name=${n}]`).value.trim();
         const altura = val('altura') ? parseInt(val('altura'), 10) : null;
         if (!altura && !val('propietario') && !val('telefono')) return toast('Cargá al menos la altura de la casa', true);
+        const colega = form.querySelector('[data-colega]:checked')?.value === 'si';
+        let venta = { en_venta_colega: false, venta_desde: null, venta_inmobiliaria: '', venta_valor: null };
+        if (colega) {
+          const cant = Number(val('venta_cant'));
+          if (!val('venta_inmobiliaria')) return toast('Indicá qué inmobiliaria la tiene a la venta', true);
+          if (!(cant >= 0) || val('venta_cant') === '') return toast('Indicá hace cuánto está a la venta', true);
+          const dias = Math.round(cant * Number(val('venta_unidad')));
+          const d = new Date(Date.now() - dias * DIA); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+          venta = { en_venta_colega: true, venta_desde: d.toISOString().slice(0, 10), venta_inmobiliaria: val('venta_inmobiliaria'), venta_valor: val('venta_valor') ? Number(val('venta_valor')) : null };
+        }
+        const archivos = (form._fotos || []).slice(0, 3);
         await conCarga(b, async () => {
-          await S.be.agregar('visitas', { asignacion_id: S.asigSel, cuadra_id: qid, calle: q.calle, altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), fecha: hoyISO() });
+          const fotos = [];
+          for (const f of archivos) fotos.push(await S.be.subirFoto(await comprimir(f)));
+          await S.be.agregar('visitas', { asignacion_id: S.asigSel, cuadra_id: qid, calle: q.calle, altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), fecha: hoyISO(), ...venta, fotos });
           S.cuadraAbierta = qid; S.abiertas.add(q.calle);
           toast('Casa guardada'); await refrescarAsesor();
         });
         break;
       }
+      case 'contactado': await conCarga(b, async () => { await S.be.editar('visitas', b.dataset.id, { ultimo_contacto: hoyISO() }); toast(`Listo. Te recordamos de nuevo en ${SEGUIR_CADA} días`); await refrescarAsesor(); }); break;
+      case 'togglePend': S.verPend = !S.verPend; renderAsesor(); break;
       case 'delVisita': if (await confirmar('Borrar casa', '¿Seguro que querés borrar este registro?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('visitas', b.dataset.id); await refrescarAsesor(); }); } break;
     }
   });
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
+  document.addEventListener('change', e => {
+    const t = e.target;
+    if (t.matches('[data-colega]')) {
+      const form = t.closest('[data-form]');
+      form.querySelector('.colega-campos').classList.toggle('hidden', t.value !== 'si');
+    }
+    if (t.matches('[data-fotos]')) {
+      const form = t.closest('[data-form]');
+      const nuevas = [...t.files].filter(f => f.type.startsWith('image/'));
+      form._fotos = [...(form._fotos || []), ...nuevas];
+      if (form._fotos.length > 3) { toast('Máximo 3 fotos por casa', true); form._fotos = form._fotos.slice(0, 3); }
+      t.value = '';
+      pintarPrevias(form);
+    }
+  });
+  function pintarPrevias(form) {
+    const prev = form.querySelector('[data-prev]');
+    prev.innerHTML = (form._fotos || []).map((f, i) => `<span class="pv"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" data-quitar="${i}">✕</button></span>`).join('');
+  }
+  document.addEventListener('click', e => {
+    const q = e.target.closest('[data-quitar]');
+    if (q) { const form = q.closest('[data-form]'); form._fotos.splice(Number(q.dataset.quitar), 1); pintarPrevias(form); return; }
+    const img = e.target.closest('img[data-foto]');
+    if (img && img.src) modal(`<img src="${img.src}" style="width:100%;border-radius:10px;display:block" alt="Foto"><button class="btn block" style="margin-top:12px" data-a="cerrarModal">Cerrar</button>`);
+  });
 
   // Refrescar contadores cada minuto
   setInterval(() => {
