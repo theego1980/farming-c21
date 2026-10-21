@@ -438,7 +438,7 @@
       S.nueva.cuadras = cuadras;
       const calles = new Set(cuadras.map(q => q.calle));
       const conAltura = cuadras.filter(q => q.desde != null).length;
-      $('#zCuadras').innerHTML = `<b>${calles.size} calles · ${cuadras.length} cuadras</b><br><span style="font-size:12px">${conAltura === cuadras.length ? 'Todas con numeración.' : `${conAltura} con numeración detectada. Las demás se ordenan por recorrido y podés fijar la altura después, en la pestaña “Cuadras”.`}</span>`;
+      $('#zCuadras').innerHTML = `<b>${calles.size} calles · ${cuadras.length} cuadras</b><br><span style="font-size:12px">${conAltura === cuadras.length ? 'Todas con numeración.' : `${conAltura} con numeración. Las demás se ordenan por recorrido y podés fijar la altura después, en la pestaña “Cuadras”.`}</span>${S.motivoNum ? `<div style="font-size:11px;margin-top:6px;opacity:.75">No se pudo consultar la numeración oficial (${esc(S.motivoNum)}).</div>` : ''}`;
       mostrarCuadras(cuadras, []);
       $('#btnGuardarZona').disabled = false;
     } catch (e) {
@@ -446,13 +446,34 @@
     }
   }
 
-  // Consulta la numeración oficial de la Ciudad (USIG) para cada cuadra
+  // Consulta la numeración oficial de la Ciudad (USIG) para cada cuadra.
+  // Primero desde el servidor; si no responde, directo desde el navegador.
+  async function usigDirecto(puntos) {
+    const out = new Array(puntos.length).fill(null); let i = 0, fallos = 0;
+    const uno = async ([lat, lon]) => {
+      const r = await fetch(`https://ws.usig.buenosaires.gob.ar/geocoder/2.2/reversegeocoding?x=${lon}&y=${lat}`);
+      const t = (await r.text()).trim().replace(/^\(/, '').replace(/\);?$/, '');
+      const m = String(JSON.parse(t).puerta || '').match(/^(.*?)\s+(\d+)\s*$/);
+      return m ? { calle: m[1], altura: Number(m[2]) } : null;
+    };
+    const w = async () => { while (i < puntos.length) { const k = i++; try { out[k] = await uno(puntos[k]); } catch { fallos++; } } };
+    await Promise.all(Array.from({ length: 6 }, w));
+    if (fallos === puntos.length) throw new Error('el navegador no pudo conectarse');
+    return out;
+  }
   async function numeracionOficial(cuadras) {
+    const puntos = cuadras.map(q => Geo.midpoint(q.coords));
+    let res = null, motivo = '';
     try {
-      const res = await S.be.alturasOficiales(cuadras.map(q => Geo.midpoint(q.coords)));
-      if (!res) return cuadras;
-      return Geo.aplicarAlturasOficiales(cuadras, res).cuadras;
-    } catch (e) { console.warn(e); return cuadras; }
+      const r = await S.be.alturasOficiales(puntos);
+      if (r) { res = r.resultados; if (r.errores && r.errores.length) motivo = 'servidor: ' + r.errores.join(', '); }
+    } catch (e) { motivo = 'servidor: ' + e.message; }
+    if (S.be.modo === 'supabase' && (!res || !res.some(Boolean))) {
+      try { res = await usigDirecto(puntos); } catch (e) { motivo += (motivo ? ' · ' : '') + 'navegador: ' + e.message; }
+    }
+    if (!res || !res.some(Boolean)) { S.motivoNum = motivo || 'el servicio de la Ciudad no devolvió alturas'; return cuadras; }
+    S.motivoNum = '';
+    return Geo.aplicarAlturasOficiales(cuadras, res).cuadras;
   }
 
   async function guardarZona(btn) {
@@ -877,7 +898,7 @@
           const cuadras = await numeracionOficial(JSON.parse(JSON.stringify(z.cuadras)));
           const n = cuadras.filter(q => q.desde != null).length;
           await S.be.guardarZona({ ...z, cuadras }); await recargar(); abrirZona(z.id);
-          toast(`${n} de ${cuadras.length} cuadras con numeración`);
+          toast(S.motivoNum ? `No se pudo consultar la numeración oficial (${S.motivoNum})` : `${n} de ${cuadras.length} cuadras con numeración`, !!S.motivoNum);
         });
         break;
       }

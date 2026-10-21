@@ -68,7 +68,7 @@
     }
     asignar(zona_id, asesor) { return this.api('/api/asignar', { zona_id, asesor }); }
     resetAcceso(asesor_id) { return this.api('/api/acceso', { asesor_id }); }
-    async alturasOficiales(puntos) { return (await this.api('/api/alturas', { puntos })).resultados; }
+    async alturasOficiales(puntos) { return await this.api('/api/alturas', { puntos }); }
     async renovar(a) {
       const { data, error } = await this.c.from('asignaciones').update({
         estado: 'activa', vence: new Date(Date.now() + 90 * DIA).toISOString(),
