@@ -156,8 +156,9 @@ async function seguimiento(url) {
   const ahora = new Date().toISOString();
   const asigs = await sb(`/rest/v1/asignaciones?estado=eq.activa&vence=gt.${ahora}&select=id,asesor_id,zona_id`);
   if (!asigs.length) return 'seguimiento: nada';
-  const filtro = encodeURIComponent('(resultado.eq."Interesado en vender",en_venta_colega.is.true)');
-  const vis = await sbTodo(`/rest/v1/visitas?asignacion_id=in.${inList(asigs.map(a => a.id))}&or=${filtro}&select=*`);
+  const filtro = encodeURIComponent('(resultado.eq."Interesado en vender",en_venta_colega.is.true,etapa.eq.tasacion)');
+  const vis = (await sbTodo(`/rest/v1/visitas?asignacion_id=in.${inList(asigs.map(a => a.id))}&or=${filtro}&select=*`))
+    .filter(v => v.etapa !== 'captacion');
   const toca = vis.filter(v => dias([v.fecha, v.ultimo_contacto, v.recordado].filter(Boolean).sort().pop()) >= SEGUIR_CADA);
   if (!toca.length) return 'seguimiento: nada';
   const perfiles = await sb(`/rest/v1/perfiles?id=in.${inList(toca.map(v => v.asesor_id))}&select=id,nombre,email`);
@@ -168,7 +169,7 @@ async function seguimiento(url) {
     const filas = vs.map(v => `<tr><td style="padding:10px 8px;border-bottom:1px solid #2A2824">
 <b style="color:#fff">${esc(v.calle)} ${v.altura ?? ''}</b><br>
 <span style="font-size:14px">${esc(v.propietario || 'Propietario sin nombre')}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}" style="color:#BEAF87">${esc(v.telefono)}</a>` : ''}</span><br>
-<span style="font-size:12px;color:#8C877C">${v.en_venta_colega ? `En venta con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ` · lleva ${tiempo(v.venta_desde)}` : ''}` : esc(v.resultado)}
+<span style="font-size:12px;color:#8C877C">${v.etapa === 'tasacion' ? 'Tasación hecha · ' : ''}${v.en_venta_colega ? `En venta con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ` · lleva ${tiempo(v.venta_desde)}` : ''}` : esc(v.resultado)}
  · ${v.ultimo_contacto ? `último contacto hace ${dias(v.ultimo_contacto)} días` : `visitada hace ${dias(v.fecha)} días`}</span></td></tr>`).join('');
     await enviarMail({
       to: p.email,
