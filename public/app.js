@@ -7,7 +7,7 @@
   const COLORES = ['#BEAF87', '#5B8DEF', '#E07A5F', '#81B29A', '#C38FD8', '#F2CC8F', '#4FB0C6', '#E76F9A', '#7FB069', '#B0A8E8', '#E9B44C', '#9AA0A6'];
   const RESULTADOS = ['Interesado en vender', 'No quiere vender', 'Interesado en tasar', 'Contacto con propietario', 'Volver a visitar', 'No atendió', 'Inquilino'];
   const SEGUIR_CADA = 15; // días entre recordatorios de seguimiento
-  const CENTRO = [-34.598, -58.505];
+  const CENTRO = [-34.608, -58.48];
 
   const S = { be: null, yo: null, d: null, vista: 'mapa', filtro: 'todas', barrios: [], callejero: null, callejeroP: null,
     map: null, capas: {}, dibujo: null, zonaAbierta: null, tabZona: 'actividad', asigSel: null, abiertas: new Set(), cuadraAbierta: null, buscar: '' };
@@ -24,7 +24,38 @@
   const diasDesde = d => d.length === 10
     ? Math.round((new Date(hoyISO() + 'T12:00:00') - new Date(d + 'T12:00:00')) / DIA)
     : Math.floor((Date.now() - new Date(d).getTime()) / DIA);
-  const enSeguimiento = v => v.resultado === 'Interesado en vender' || !!v.en_venta_colega;
+  const ETAPAS = [['contacto', 'Contacto'], ['tasacion', 'Tasación'], ['captacion', 'Captación']];
+  const etapaDe = v => v.etapa || ((v.propietario || v.telefono) ? 'contacto' : '');
+  const enSeguimiento = v => v.etapa !== 'captacion' && (v.resultado === 'Interesado en vender' || !!v.en_venta_colega || v.etapa === 'tasacion');
+
+  // WhatsApp: normaliza el número argentino al formato internacional (549 + área + número)
+  function numeroWA(t) {
+    let d = String(t || '').replace(/\D/g, '');
+    if (!d) return null;
+    if (d.startsWith('00')) d = d.slice(2);
+    if (d.startsWith('54')) { d = d.slice(2); if (d.startsWith('9')) d = d.slice(1); }
+    if (d.startsWith('0')) d = d.slice(1);
+    if (d.length === 12 && d.startsWith('11') && d.slice(2, 4) === '15') d = '11' + d.slice(4);       // 11 15 xxxx xxxx
+    else if (d.length === 10 && d.startsWith('15')) d = '11' + d.slice(2);                              // 15 xxxx xxxx (CABA)
+    else if (d.length === 8) d = '11' + d;                                                              // xxxx xxxx (CABA)
+    else if (d.length > 10) { const m = d.match(/^(\d{2,4})15(\d{6,8})$/); if (m && (m[1] + m[2]).length === 10) d = m[1] + m[2]; }
+    return d.length === 10 ? '549' + d : null;
+  }
+  function linkWA(v) {
+    const n = numeroWA(v.telefono); if (!n) return null;
+    const yo = S.yo ? `${S.yo.nombre} ${S.yo.apellido}`.trim() : '';
+    const prop = (v.propietario || '').trim().split(/\s+/)[0];
+    const dir = `${v.calle} ${v.altura ?? ''}`.trim();
+    let cuerpo;
+    if (v.etapa === 'tasacion') cuerpo = `Te escribo para darle seguimiento a la tasación de tu propiedad de ${dir}. ¿Tenés unos minutos para charlar?`;
+    else if (v.en_venta_colega) cuerpo = `Te escribo por tu propiedad de ${dir}, que vi que está a la venta. Me gustaría contarte cómo trabajamos en Century 21 para venderla. ¿Te puedo llamar?`;
+    else if (v.resultado === 'Interesado en vender') cuerpo = `Te escribo por tu propiedad de ${dir}, como habíamos hablado sobre la posibilidad de venderla. ¿Cuándo te queda cómodo que conversemos?`;
+    else if (v.resultado === 'Interesado en tasar') cuerpo = `Te escribo por la tasación de tu propiedad de ${dir}. ¿Qué día te queda cómodo que pase a verla?`;
+    else cuerpo = `Pasé por tu propiedad de ${dir} y te dejo mi contacto por cualquier consulta inmobiliaria del barrio.`;
+    const txt = `Hola${prop ? ' ' + prop : ''}! Soy ${yo || 'asesor'} de Century 21 Inmopul Devoto. ${cuerpo}`;
+    return `https://wa.me/${n}?text=${encodeURIComponent(txt)}`;
+  }
+  const btnWA = v => { const l = linkWA(v); return l ? `<a class="btn sm wa" target="_blank" rel="noopener" href="${l}"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2zm5.3 14.1c-.2.6-1.3 1.2-1.8 1.2-.5.1-1 .2-3.3-.7-2.8-1.1-4.5-3.9-4.7-4.1-.1-.2-1.1-1.5-1.1-2.8s.7-2 1-2.3c.2-.3.5-.3.7-.3h.5c.2 0 .4 0 .6.5l.8 2c.1.2.1.4 0 .5l-.4.6-.4.4c-.1.1-.3.3-.1.6.2.3.8 1.3 1.7 2.1 1.2 1 2.1 1.4 2.4 1.5.3.1.5.1.6-.1l.8-1c.2-.3.4-.2.6-.1l1.9.9c.3.1.5.2.5.3.1.2.1.7-.1 1.3z"/></svg>WhatsApp</a>` : ''; };
   function tiempoVenta(desde) {
     const d = Math.max(0, diasDesde(desde));
     if (d < 31) return `${d} ${d === 1 ? 'día' : 'días'}`;
@@ -53,8 +84,11 @@
         ${v.venta_desde ? `<div class="reloj">⏱ Lleva <b>${tiempoVenta(v.venta_desde)}</b> a la venta <span class="muted">(desde ${fechaL(v.venta_desde + 'T12:00:00')})</span></div>` : ''}</div>` : ''}
       ${v.notas ? `<div class="muted" style="font-size:13px">${esc(v.notas)}</div>` : ''}
       ${(v.fotos || []).length ? `<div class="fotos">${v.fotos.map(f => `<img data-foto="${esc(f)}" alt="Foto de la casa">`).join('')}</div>` : ''}
+      ${etapaDe(v) ? `<div class="etapas">${ETAPAS.map(([k, t], i) => { const idx = ETAPAS.findIndex(x => x[0] === etapaDe(v)); const est = i < idx ? 'hecha' : i === idx ? 'actual' : ''; const f = k === 'tasacion' ? v.tasacion_fecha : k === 'captacion' ? v.captacion_fecha : null;
+          return `<button class="et ${est}" ${puede ? `data-a="etapa" data-id="${v.id}" data-e="${k}"` : 'disabled'}>${i ? '' : ''}${est ? '●' : '○'} ${t}${f ? `<small>${fecha(f)}</small>` : ''}</button>`; }).join('<span class="et-sep">›</span>')}</div>` : ''}
       ${prox != null ? `<div class="seg ${prox <= 0 ? 'hoy' : ''}"><span>${prox <= 0 ? '☎ Toca llamar' : `☎ Próximo llamado en ${prox} ${prox === 1 ? 'día' : 'días'}`}${v.ultimo_contacto ? ` · últ. contacto ${fecha(v.ultimo_contacto)}` : ''}</span>
-        ${puede ? `<button class="btn sm" data-a="contactado" data-id="${v.id}">✓ Contactado</button>` : ''}</div>` : ''}
+        <span class="row" style="gap:6px">${btnWA(v)}${puede ? `<button class="btn sm" data-a="contactado" data-id="${v.id}">✓ Contactado</button>` : ''}</span></div>` : (v.telefono && linkWA(v) ? `<div class="seg"><span></span>${btnWA(v)}</div>` : '')}
+      ${v.etapa === 'captacion' ? `<div class="captada">🏆 Captación firmada${v.captacion_fecha ? ' el ' + fechaL(v.captacion_fecha + 'T12:00:00') : ''}</div>` : ''}
       ${extra}</div>`;
   }
 
@@ -109,6 +143,40 @@
     finally { if (btn) { btn.disabled = false; btn.innerHTML = t; } }
   }
 
+  // ---------------- App instalable y modo sin señal ----------------
+  function registrarSW() {
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW', e));
+  }
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.promptInstalar = e; });
+  window.addEventListener('appinstalled', () => { S.promptInstalar = null; toast('¡App instalada!'); document.querySelector('.instalar-card')?.remove(); });
+  const esIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const instalada = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  function sugerirInstalar() {
+    let no = false; try { no = localStorage.getItem('farming_no_instalar') === '1'; } catch { }
+    return !no && !instalada() && (S.promptInstalar || esIOS() || /android/i.test(navigator.userAgent));
+  }
+  async function instalar() {
+    if (S.promptInstalar) { S.promptInstalar.prompt(); const r = await S.promptInstalar.userChoice.catch(() => null); if (r && r.outcome === 'accepted') S.promptInstalar = null; return; }
+    modal(esIOS() ? `<h3>Instalar en iPhone</h3><ol class="pasos"><li>Abrí esta página en <b>Safari</b>.</li><li>Tocá el botón <b>Compartir</b> <span style="font-size:18px">⬆︎</span> (abajo en el centro).</li><li>Elegí <b>“Agregar a inicio”</b> y tocá <b>Agregar</b>.</li></ol><p class="muted" style="font-size:13px">Queda el ícono de C21 Inmopul en tu pantalla de inicio.</p><button class="btn primary block" data-a="cerrarModal">Entendido</button>`
+      : `<h3>Instalar la app</h3><ol class="pasos"><li>Abrí esta página en <b>Chrome</b>.</li><li>Tocá el menú <b>⋮</b> (arriba a la derecha).</li><li>Elegí <b>“Instalar aplicación”</b> o <b>“Agregar a la pantalla principal”</b>.</li></ol><p class="muted" style="font-size:13px">En la computadora, el ícono de instalar aparece a la derecha de la barra de direcciones.</p><button class="btn primary block" data-a="cerrarModal">Entendido</button>`);
+  }
+  async function cambioRed(info = {}) {
+    const chip = document.getElementById('netChip');
+    const n = S.be.pendientesSubir ? await S.be.pendientesSubir() : 0;
+    if (chip) {
+      const off = S.be.offline || !navigator.onLine;
+      chip.classList.toggle('hidden', !off && !n && !S.be.sincronizando);
+      chip.classList.toggle('off', off);
+      chip.textContent = off ? `Sin señal${n ? ` · ${n} por subir` : ''}` : S.be.sincronizando ? `Subiendo ${n}…` : n ? `${n} por subir` : '';
+    }
+    while (S.be.fallidos && S.be.fallidos.length) toast(S.be.fallidos.shift(), true);
+    if (info.subidos) {
+      toast(`✓ Se subieron ${info.subidos} ${info.subidos === 1 ? 'dato cargado' : 'datos cargados'} sin señal`);
+      const ocupado = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+      if (!ocupado && S.yo && S.yo.rol !== 'admin' && S.d) { try { await refrescarAsesor(); } catch { } }
+    }
+  }
+
   // ---------------- Lógica de negocio ----------------
   const ahora = () => Date.now();
   function estadoAsig(a) {
@@ -135,9 +203,23 @@
     return {
       visitas: v.length, contactos: v.filter(x => (x.telefono || '').trim()).length,
       horas: j.reduce((s, x) => s + Number(x.horas || 0), 0), jornadas: j.length,
+      interesados: v.filter(x => x.resultado === 'Interesado en vender').length,
+      tasaciones: v.filter(x => x.tasacion_fecha || x.etapa === 'tasacion').length,
+      captaciones: v.filter(x => x.etapa === 'captacion').length,
+      cuadras: new Set(v.map(x => x.cuadra_id)),
       ultima: fechas.length ? fechas[fechas.length - 1] : null, v, j,
     };
   }
+  // Cobertura: cuadras con al menos una casa cargada / total de cuadras de la zona
+  function cobertura(z, a) {
+    const tot = (z.cuadras || []).length;
+    const ids = new Set((z.cuadras || []).map(q => q.id));
+    const hechas = [...stats([a.id]).cuadras].filter(id => ids.has(id)).length;
+    return { hechas, tot, pct: tot ? Math.round(100 * hechas / tot) : 0 };
+  }
+  const barraCob = (c, extra = '') => `<div class="cob"><div class="cob-h"><span>Cobertura de la zona</span><b>${c.pct}%</b></div>
+    <div class="bar cobbar"><i style="width:${c.pct}%"></i></div><small>${c.hechas} de ${c.tot} cuadras trabajadas${extra}</small></div>`;
+  const embudo = st => `<div class="embudo"><span><b>${st.contactos}</b> contactos</span><span>›</span><span><b>${st.interesados}</b> quieren vender</span><span>›</span><span><b>${st.tasaciones}</b> tasaciones</span><span>›</span><span class="cap"><b>${st.captaciones}</b> captaciones</span></div>`;
   function estadoZona(z) {
     const a = vigente(z.id); const e = estadoAsig(a);
     const pronto = e === 'activa' && restante(a).ms < 10 * DIA;
@@ -152,13 +234,17 @@
 
   // ---------------- Arranque ----------------
   async function init() {
-    S.be = await Datos.crearBackend();
+    registrarSW();
+    try { S.be = await Datos.crearBackend(); }
+    catch (e) { $('#app').innerHTML = `<div class="login"><div class="card"><img src="logo.png" alt="Century 21 Inmopul" class="login-logo"><h1 style="font-size:20px">Sin conexión</h1><p class="muted">${esc(e.message)}</p><button class="btn primary block" onclick="location.reload()">Reintentar</button></div></div>`; return; }
+    S.be.onCambio = cambioRed;
     S.yo = await S.be.perfil().catch(() => null);
     if (!S.yo) return pantallaLogin();
     await entrar();
   }
   async function entrar() {
-    try { await recargar(); } catch (e) { toast('No pude cargar los datos: ' + e.message, true); }
+    try { await recargar(); } catch (e) { toast('No pude cargar los datos: ' + e.message, true); if (!S.d) S.d = { perfiles: [S.yo], zonas: [], asignaciones: [], visitas: [], jornadas: [] }; }
+    if (S.be.sincronizar) S.be.sincronizar();
     if (S.yo.rol === 'admin') { S.vista = 'mapa'; renderAdmin(); } else renderAsesor();
   }
 
@@ -202,7 +288,7 @@
 
   function topbar(navHtml) {
     return `<header class="top"><div class="brand"><img src="logo.png" alt="C21 Inmopul" class="brand-logo"><span class="brand-sep"></span><div><b>Farming</b><small>Devoto</small></div>
-      ${S.be.modo === 'demo' ? '<span class="chip-demo">DEMO</span>' : ''}</div>
+      ${S.be.modo === 'demo' ? '<span class="chip-demo">DEMO</span>' : ''}<span id="netChip" class="netchip hidden"></span></div>
       ${navHtml || '<div style="margin-left:auto"></div>'}
       <button class="iconbtn" data-a="cuenta" title="Mi cuenta"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg></button></header>`;
   }
@@ -213,6 +299,7 @@
       <label class="f">Repetila</label><input class="i" type="password" id="np2" minlength="6">
       <button class="btn block" style="margin-top:12px" data-a="cambiarPass">Cambiar contraseña</button>` : ''}
       ${S.be.modo === 'demo' && S.yo.rol === 'admin' ? '<button class="btn danger block" style="margin-top:12px" data-a="reiniciarDemo">Borrar datos de la demostración</button>' : ''}
+      ${!instalada() ? `<button class="btn block" style="margin-top:12px" data-a="instalar">📲 Instalar la app en este dispositivo</button>` : ''}
       <div class="row" style="margin-top:16px;justify-content:space-between"><button class="btn ghost" data-a="cerrarModal">Cerrar</button><button class="btn danger" data-a="salir">Cerrar sesión</button></div>`);
   }
 
@@ -229,7 +316,7 @@
       <button class="${S.vista === 'mapa' ? 'on' : ''}" data-v="mapa">Mapa</button>
       <button class="${S.vista === 'zonas' ? 'on' : ''}" data-v="zonas">Zonas${nv ? `<span class="dot">${nv}</span>` : ''}</button>
       <button class="${S.vista === 'oport' ? 'on' : ''}" data-v="oport">Oportunidades${np ? `<span class="dot warn">${np}</span>` : ''}</button>
-      <button class="${S.vista === 'asesores' ? 'on' : ''}" data-v="asesores">Asesores</button></nav>`;
+      <button class="${S.vista === 'asesores' ? 'on' : ''}" data-v="asesores">Equipo</button></nav>`;
     if (S.vista === 'mapa') {
       if (!S.map || !document.getElementById('map')) {
         $('#app').innerHTML = topbar(nav) + `<main><div class="map-wrap"><div id="map"></div>
@@ -244,6 +331,7 @@
       $('#app').innerHTML = topbar(nav) + `<main><div class="wrap" id="vista"></div></main>`;
       S.vista === 'zonas' ? vistaZonas() : S.vista === 'oport' ? vistaOportunidades() : vistaAsesores();
     }
+    cambioRed();
   }
 
   // Mapa base de OpenStreetMap (gratuito, sin clave)
@@ -378,7 +466,7 @@
     if (!S.callejero) {
       const t0 = Date.now();
       const pinta = () => { const m = $('#callesMsg .note b'); if (m) m.textContent = Math.round((Date.now() - t0) / 1000) + ' s'; };
-      msg.innerHTML = '<div class="note" style="margin-top:12px">Descargando las calles de los tres barrios… <b>0 s</b><br><span style="font-size:12px">Sólo la primera vez. Puede tardar hasta un minuto; podés tocar “Trazar zona” igual y espera solo.</span></div>';
+      msg.innerHTML = '<div class="note" style="margin-top:12px">Descargando las calles de los seis barrios… <b>0 s</b><br><span style="font-size:12px">Sólo la primera vez. Puede tardar hasta un minuto; podés tocar “Trazar zona” igual y espera solo.</span></div>';
       S.relojCalles = setInterval(pinta, 1000);
     }
     cargarCallejero().then(c => {
@@ -533,6 +621,7 @@
         <div class="stats" style="margin-top:10px">
           <div class="stat"><b>${st.visitas}</b><span>CASAS</span></div><div class="stat"><b>${st.contactos}</b><span>CON TELÉFONO</span></div>
           <div class="stat"><b>${num(st.horas)}</b><span>HORAS</span></div><div class="stat"><b>${st.jornadas}</b><span>JORNADAS</span></div></div>
+        ${barraCob(cobertura(z, a))}${embudo(st)}
         <p class="muted" style="font-size:12px;margin:8px 0 0">Última actividad: ${st.ultima ? fechaL(st.ultima) : 'sin movimiento todavía'} · Asignada el ${fechaL(a.inicio)}</p>`;
       if (e === 'vencida') {
         html += `<div class="decision"><h3>Venció el plazo de 90 días</h3><p class="muted" style="margin:0 0 12px;font-size:14px">Evaluá el trabajo de ${esc(as?.nombre || 'el asesor')} y decidí qué hacer con la zona.</p>
@@ -583,7 +672,7 @@
       el.innerHTML = hist.length ? hist.map(h => { const st = stats([h.id]); const e = estadoAsig(h); return `<div class="card" style="padding:12px 14px;margin-bottom:8px">
         <div class="row" style="justify-content:space-between"><b>${esc(nombre(perfil(h.asesor_id)))}</b>${e === 'finalizada' ? `<span class="badge">${h.motivo_fin === 'liberada' ? 'Liberada' : 'Reasignada'}</span>` : badge(e, false, h)}</div>
         <div class="muted" style="font-size:13px;margin-top:4px">${fechaL(h.inicio)} → ${h.finalizada ? fechaL(h.finalizada) : fechaL(h.vence)}${h.renovaciones ? ` · ${h.renovaciones} renovación(es)` : ''}</div>
-        <div style="font-size:13px;margin-top:6px">${st.visitas} casas · ${st.contactos} con teléfono · ${num(st.horas)} h en ${st.jornadas} jornadas</div></div>`; }).join('') : '<p class="empty">Sin historial.</p>';
+        <div style="font-size:13px;margin-top:6px">${cobertura(z, h).pct}% cubierta · ${st.visitas} casas · ${st.contactos} con teléfono · ${num(st.horas)} h en ${st.jornadas} jornadas · ${st.tasaciones} tasaciones · ${st.captaciones} captaciones</div></div>`; }).join('') : '<p class="empty">Sin historial.</p>';
     }
   }
 
@@ -635,9 +724,9 @@
   function csv(z, a) {
     const st = stats([a.id]);
     const qmap = new Map((z.cuadras || []).map(q => [q.id, q]));
-    const filas = [['Fecha', 'Calle', 'Altura', 'Propietario', 'Teléfono', 'Resultado', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Notas', 'Cuadra', 'Asesor']];
+    const filas = [['Fecha', 'Calle', 'Altura', 'Propietario', 'Teléfono', 'Resultado', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Etapa', 'Fecha tasación', 'Fecha captación', 'Notas', 'Cuadra', 'Asesor']];
     const as = nombre(perfil(a.asesor_id));
-    st.v.forEach(v => { const q = qmap.get(v.cuadra_id); filas.push([v.fecha, v.calle, v.altura ?? '', v.propietario, v.telefono, v.resultado, v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', v.notas, q ? entreTxt(q) : '', as]); });
+    st.v.forEach(v => { const q = qmap.get(v.cuadra_id); filas.push([v.fecha, v.calle, v.altura ?? '', v.propietario, v.telefono, v.resultado, v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', (ETAPAS.find(x => x[0] === etapaDe(v)) || ['', ''])[1], v.tasacion_fecha || '', v.captacion_fecha || '', v.notas, q ? entreTxt(q) : '', as]); });
     const txt = '﻿' + filas.map(f => f.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const blob = new Blob([txt], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `farming-${z.nombre.replace(/[^\w]+/g, '-')}.csv`; link.click();
@@ -656,7 +745,7 @@
       <div class="zl">${filtradas.length ? filtradas.map(({ z, a, e, pronto }) => { const st = a ? stats([a.id]) : null; return `<div class="zcard ${e}" data-zona="${z.id}">
         <div class="t"><span class="swatch" style="background:${z.color}"></span><b>${esc(z.nombre)}</b>${badge(e, pronto, a)}</div>
         <div class="m"><span>${a ? esc(nombre(perfil(a.asesor_id))) : 'Sin asesor'}</span>${z.barrio ? `<span class="serif">${esc(z.barrio)}</span>` : ''}<span>${(z.cuadras || []).length} cuadras</span></div>
-        ${st ? `<div class="m"><span>🏠 ${st.visitas} casas</span><span>☎ ${st.contactos}</span><span>⏱ ${num(st.horas)} h</span><span>${st.ultima ? 'Últ. ' + fecha(st.ultima) : 'Sin movimiento'}</span></div>` : ''}
+        ${st ? `<div class="m"><span>🗺 ${cobertura(z, a).pct}% cubierta</span><span>🏠 ${st.visitas} casas</span><span>☎ ${st.contactos}</span><span>⏱ ${num(st.horas)} h</span>${st.captaciones ? `<span class="gold">🏆 ${st.captaciones}</span>` : ''}<span>${st.ultima ? 'Últ. ' + fecha(st.ultima) : 'Sin movimiento'}</span></div>` : ''}
         ${e === 'vencida' ? '<div class="row"><button class="btn sm primary" data-a="renovarZ" data-z="' + z.id + '">Renovar 90 días</button><button class="btn sm" data-a="asignarZ" data-z="' + z.id + '">Asignar a otro</button></div>' : ''}
       </div>`; }).join('') : `<div class="empty"><b>${S.d.zonas.length ? 'No hay zonas con este filtro' : 'Todavía no hay zonas'}</b>${S.d.zonas.length ? '' : 'Andá al mapa para crear la primera.'}</div>`}</div>`;
   }
@@ -666,33 +755,70 @@
     const el = $('#vista');
     const f = S.filtroOp || 'colega';
     const zonaDe = v => { const a = S.d.asignaciones.find(x => x.id === v.asignacion_id); return { a, z: a ? S.d.zonas.find(z => z.id === a.zona_id) : null }; };
-    let lista = S.d.visitas.filter(v => f === 'colega' ? v.en_venta_colega : f === 'vender' ? v.resultado === 'Interesado en vender' : f === 'tasar' ? v.resultado === 'Interesado en tasar' : (enSeguimiento(v) && proximoContacto(v) <= 0));
+    const filtroOp = k => v => k === 'colega' ? v.en_venta_colega && v.etapa !== 'captacion' : k === 'vender' ? v.resultado === 'Interesado en vender' && v.etapa !== 'captacion' : k === 'tasar' ? v.resultado === 'Interesado en tasar' && !v.etapa
+      : k === 'tasaciones' ? v.etapa === 'tasacion' : k === 'captaciones' ? v.etapa === 'captacion' : (enSeguimiento(v) && proximoContacto(v) <= 0);
+    let lista = S.d.visitas.filter(filtroOp(f));
     if (f === 'colega') lista.sort((a, b) => (a.venta_desde || '9').localeCompare(b.venta_desde || '9'));
+    else if (f === 'captaciones') lista.sort((a, b) => (b.captacion_fecha || '').localeCompare(a.captacion_fecha || ''));
     else lista.sort((a, b) => (b.creado || '').localeCompare(a.creado || ''));
-    const c = k => S.d.visitas.filter(v => k === 'colega' ? v.en_venta_colega : k === 'vender' ? v.resultado === 'Interesado en vender' : k === 'tasar' ? v.resultado === 'Interesado en tasar' : (enSeguimiento(v) && proximoContacto(v) <= 0)).length;
+    const c = k => S.d.visitas.filter(filtroOp(k)).length;
     el.innerHTML = `<h2>Oportunidades</h2>
       <p class="muted" style="font-size:14px;margin:6px 0 0">Las casas en venta con colegas aparecen primero las que llevan más tiempo en el mercado.</p>
-      <div class="filters">${[['colega', 'En venta con colegas'], ['vender', 'Quieren vender'], ['tasar', 'Quieren tasar'], ['atrasados', 'Llamados pendientes']].map(([k, t]) => `<button class="${f === k ? 'on' : ''}" data-fop="${k}">${t} (${c(k)})</button>`).join('')}</div>
+      <div class="filters">${[['colega', 'En venta con colegas'], ['vender', 'Quieren vender'], ['tasar', 'Quieren tasar'], ['tasaciones', 'Tasaciones'], ['captaciones', '🏆 Captaciones'], ['atrasados', 'Llamados pendientes']].map(([k, t]) => `<button class="${f === k ? 'on' : ''}" data-fop="${k}">${t} (${c(k)})</button>`).join('')}</div>
       ${lista.length ? `<div class="zl">${lista.map(v => { const { a, z } = zonaDe(v); return tarjetaVisita(v, { extra: `<div class="muted" style="font-size:12px;margin-top:2px">${z ? `<a href="#" data-zona="${z.id}">${esc(z.nombre)}</a> · ` : ''}${esc(nombre(perfil(v.asesor_id)))}</div>` }); }).join('')}</div>`
         : '<div class="empty"><b>Nada por acá todavía</b>A medida que los asesores carguen casas, van a aparecer.</div>'}`;
     cargarFotos(el);
   }
 
-  // ---------- Vista: asesores ----------
+  // ---------- Vista: equipo (tablero comparativo) ----------
   function vistaAsesores() {
     const el = $('#vista');
-    const ases = S.d.perfiles.filter(p => p.rol !== 'admin').sort((a, b) => nombre(a).localeCompare(nombre(b), 'es'));
-    el.innerHTML = `<h2>Asesores <span class="muted" style="font-size:15px;font-weight:500">(${ases.length})</span></h2>
-      <p class="muted" style="font-size:14px">Los asesores se dan de alta al asignarles una zona. No hay límite de cantidad.</p>
-      <div class="zl">${ases.length ? ases.map(p => {
-        const asigs = S.d.asignaciones.filter(a => a.asesor_id === p.id);
-        const vig = asigs.filter(a => a.estado !== 'finalizada');
-        const st = stats(asigs.map(a => a.id));
-        return `<div class="card"><div class="row" style="justify-content:space-between"><div><b style="font-size:16px">${esc(nombre(p))}</b><div class="muted" style="font-size:13px">${esc(p.email)}</div></div>
-          <button class="btn sm" data-a="reset" data-p="${p.id}">Reenviar acceso</button></div>
-          <div class="row" style="margin-top:10px">${vig.length ? vig.map(a => { const z = S.d.zonas.find(x => x.id === a.zona_id); const e = estadoAsig(a); return z ? `<button class="badge ${e === 'vencida' ? 'vencida' : 'activa'}" style="border:0;cursor:pointer" data-zona="${z.id}">${esc(z.nombre)} · ${e === 'vencida' ? 'vencida' : restante(a).txt}</button>` : ''; }).join('') : '<span class="badge libre">Sin zona vigente</span>'}</div>
-          <div class="muted" style="font-size:13px;margin-top:8px">Total histórico: ${st.visitas} casas · ${st.contactos} con teléfono · ${num(st.horas)} h en ${st.jornadas} jornadas</div></div>`;
-      }).join('') : '<div class="empty"><b>Todavía no hay asesores</b>Creá una zona en el mapa y asignala: ahí cargás nombre, apellido y correo.</div>'}</div>`;
+    const per = S.periodo || 'vigente';
+    const desde = per === '30' ? new Date(Date.now() - 30 * DIA).toISOString() : per === '7' ? new Date(Date.now() - 7 * DIA).toISOString() : null;
+    const enPer = f => !desde || (f && f >= desde.slice(0, f.length === 10 ? 10 : 30));
+    const ases = S.d.perfiles.filter(p => p.rol !== 'admin');
+    const filas = ases.map(p => {
+      const asigs = S.d.asignaciones.filter(a => a.asesor_id === p.id);
+      const vig = asigs.filter(a => a.estado !== 'finalizada');
+      const base = per === 'vigente' ? vig : asigs;
+      const ids = new Set(base.map(a => a.id));
+      const v = S.d.visitas.filter(x => ids.has(x.asignacion_id));
+      const j = S.d.jornadas.filter(x => ids.has(x.asignacion_id));
+      const vv = v.filter(x => enPer(x.creado)), jj = j.filter(x => enPer(x.fecha));
+      const cobs = vig.map(a => { const z = S.d.zonas.find(x => x.id === a.zona_id); return z ? cobertura(z, a) : null; }).filter(Boolean);
+      const cob = cobs.length ? Math.round(cobs.reduce((s, c) => s + c.hechas, 0) / Math.max(1, cobs.reduce((s, c) => s + c.tot, 0)) * 100) : null;
+      const ult = [...v.map(x => x.creado), ...j.map(x => x.creado)].filter(Boolean).sort().pop();
+      return { p, vig, cob, ult,
+        horas: jj.reduce((s, x) => s + Number(x.horas || 0), 0), jornadas: jj.length, casas: vv.length,
+        contactos: vv.filter(x => (x.telefono || '').trim()).length,
+        tasaciones: v.filter(x => x.tasacion_fecha && enPer(x.tasacion_fecha)).length,
+        captaciones: v.filter(x => x.etapa === 'captacion' && enPer(x.captacion_fecha || x.creado)).length,
+        pend: pendientes(v.filter(x => vig.some(a => a.id === x.asignacion_id && estadoAsig(a) === 'activa'))).length };
+    }).sort((a, b) => (b.captaciones - a.captaciones) || (b.tasaciones - a.tasaciones) || (b.contactos - a.contactos) || (b.horas - a.horas) || nombre(a.p).localeCompare(nombre(b.p), 'es'));
+    const tot = k => filas.reduce((s, f) => s + f[k], 0);
+    const maxH = Math.max(1, ...filas.map(f => f.horas)), maxC = Math.max(1, ...filas.map(f => f.contactos));
+    const medalla = i => filas[i] && (filas[i].captaciones || filas[i].tasaciones || filas[i].contactos) ? ['🥇', '🥈', '🥉'][i] || '' : '';
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>Equipo <span class="muted" style="font-size:15px;font-weight:500">(${ases.length})</span></h2></div>
+      <div class="filters">${[['vigente', 'Zonas vigentes'], ['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['todo', 'Histórico']].map(([k, t]) => `<button class="${per === k ? 'on' : ''}" data-per="${k}">${t}</button>`).join('')}</div>
+      ${ases.length ? `<div class="card equipo-tot"><div class="stats six">
+        <div class="stat"><b>${num(tot('horas'))}</b><span>HORAS</span></div><div class="stat"><b>${tot('jornadas')}</b><span>JORNADAS</span></div>
+        <div class="stat"><b>${tot('casas')}</b><span>CASAS</span></div><div class="stat"><b>${tot('contactos')}</b><span>CONTACTOS</span></div>
+        <div class="stat"><b>${tot('tasaciones')}</b><span>TASACIONES</span></div><div class="stat gold-stat"><b>${tot('captaciones')}</b><span>CAPTACIONES</span></div></div></div>` : ''}
+      <div class="zl" style="margin-top:12px">${filas.length ? filas.map((f, i) => `<div class="card ase">
+        <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
+          <div style="min-width:0"><b style="font-size:16px">${medalla(i)} ${esc(nombre(f.p))}</b><div class="muted" style="font-size:12px">${esc(f.p.email)} · ${f.ult ? 'últ. actividad ' + fecha(f.ult) : 'sin actividad'}</div></div>
+          <button class="btn sm ghost" data-a="reset" data-p="${f.p.id}">Reenviar acceso</button></div>
+        <div class="row" style="margin-top:8px">${f.vig.length ? f.vig.map(a => { const z = S.d.zonas.find(x => x.id === a.zona_id); const e = estadoAsig(a); return z ? `<button class="badge ${e === 'vencida' ? 'vencida' : 'activa'}" style="border:0;cursor:pointer" data-zona="${z.id}">${esc(z.nombre)} · ${e === 'vencida' ? 'vencida' : restante(a).txt}</button>` : ''; }).join('') : '<span class="badge libre">Sin zona vigente</span>'}${f.pend ? `<span class="badge pronto">☎ ${f.pend} llamados atrasados</span>` : ''}</div>
+        <div class="metr">
+          <div><span>Cobertura</span><b>${f.cob == null ? '—' : f.cob + '%'}</b><i class="mb"><em style="width:${f.cob || 0}%"></em></i></div>
+          <div><span>Horas</span><b>${num(f.horas)}</b><i class="mb"><em style="width:${100 * f.horas / maxH}%"></em></i></div>
+          <div><span>Contactos</span><b>${f.contactos}</b><i class="mb"><em style="width:${100 * f.contactos / maxC}%"></em></i></div>
+          <div><span>Jornadas</span><b>${f.jornadas}</b></div>
+          <div><span>Casas</span><b>${f.casas}</b></div>
+          <div><span>Tasaciones</span><b>${f.tasaciones}</b></div>
+          <div class="cap"><span>Captaciones</span><b>${f.captaciones}</b></div>
+        </div></div>`).join('') : '<div class="empty"><b>Todavía no hay asesores</b>Creá una zona en el mapa y asignala: ahí cargás nombre, apellido y correo.</div>'}</div>
+      ${filas.length ? '<p class="muted" style="font-size:12px;margin-top:10px">Ordenado por captaciones, después tasaciones, contactos y horas. La cobertura es siempre sobre las zonas vigentes.</p>' : ''}`;
   }
 
   // =====================================================================
@@ -721,11 +847,14 @@
       ${S.verPend ? `<div class="al-lista">${pend.map(v => { const atraso = -proximoContacto(v); return `<div class="al-item">
         <div class="grow"><b>${esc(v.propietario || 'Propietario')}</b> <span class="muted">· ${esc(v.calle)} ${v.altura ?? ''}</span>
           <div style="font-size:12px;color:var(--tx2)">${v.en_venta_colega ? `En venta con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ' · lleva ' + tiempoVenta(v.venta_desde) : ''}` : esc(v.resultado)}${atraso > 0 ? ` · <span style="color:var(--warn)">${atraso} ${atraso === 1 ? 'día' : 'días'} de atraso</span>` : ''}</div></div>
-        <div class="al-acc">${v.telefono ? `<a class="btn sm" href="tel:${esc(v.telefono)}">📞 Llamar</a>` : ''}<button class="btn sm primary" data-a="contactado" data-id="${v.id}">✓ Contactado</button></div></div>`; }).join('')}</div>` : ''}
+        <div class="al-acc">${v.telefono ? `<a class="btn sm" href="tel:${esc(v.telefono)}">📞 Llamar</a>` : ''}${btnWA(v)}<button class="btn sm primary" data-a="contactado" data-id="${v.id}">✓ Contactado</button></div></div>`; }).join('')}</div>` : ''}
     </div>` : '';
     $('#app').innerHTML = topbar() + `<main><div class="wrap">
       ${vig.length > 1 ? `<div class="filters">${vig.map(x => `<button class="${x.id === a.id ? 'on' : ''}" data-asig="${x.id}">${esc(S.d.zonas.find(z => z.id === x.zona_id)?.nombre || 'Zona')}</button>`).join('')}</div>` : ''}
       ${banner}
+      ${sugerirInstalar() ? `<div class="card instalar-card"><div class="row" style="flex-wrap:nowrap;gap:12px"><img src="icono-192.png" alt="" width="44" height="44" style="border-radius:10px">
+        <div class="grow" style="flex:1"><b>Instalá la app en tu celular</b><div class="muted" style="font-size:13px">Queda con ícono propio y funciona aunque te quedes sin señal en la calle.</div></div></div>
+        <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn sm ghost" data-a="ocultarInstalar">Ahora no</button><button class="btn sm primary" data-a="instalar">Instalar</button></div></div>` : ''}
       <div class="card">
         <div class="muted" style="font-size:12px;font-weight:700;letter-spacing:1px">TU ZONA</div>
         <h2 style="font-size:24px;margin-top:2px">${esc(z.nombre)}</h2>${z.barrio ? `<div class="serif gold">${esc(z.barrio)}</div>` : ''}
@@ -735,6 +864,8 @@
         <div class="bar ${e === 'vencida' ? 'bad' : pronto ? 'warn' : ''}"><i style="width:${pct(a)}%"></i></div>
         ${e === 'vencida' ? '<div class="err" style="margin-top:12px">Se cumplieron los 90 días. El broker está evaluando tu trabajo para renovar o reasignar la zona. Mientras tanto no se pueden cargar datos.</div>' : ''}
         <div class="stats" style="margin-top:14px"><div class="stat"><b>${st.visitas}</b><span>CASAS</span></div><div class="stat"><b>${st.contactos}</b><span>CON TELÉFONO</span></div><div class="stat"><b>${num(st.horas)}</b><span>HORAS</span></div><div class="stat"><b>${st.jornadas}</b><span>JORNADAS</span></div></div>
+        ${barraCob(cobertura(z, a))}
+        ${embudo(st)}
       </div>
 
       <div class="card"><h3 style="font-size:16px">Registrar jornada</h3>
@@ -746,15 +877,17 @@
           (jor.length > 5 && !S.verTodasJ ? `<button class="btn sm ghost" data-a="verTodasJ">Ver las ${jor.length}</button>` : '') : '<p class="muted" style="font-size:13px;margin:0">Todavía no registraste jornadas.</p>'}</div>
       </div>
 
-      <div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:16px">Mapa de la zona</h3><span class="muted" style="font-size:12px">Dorado = cuadras trabajadas</span></div>
+      <div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:16px">Mapa de la zona</h3><span class="muted" style="font-size:12px">Dorado = trabajadas · Gris = pendientes</span></div>
         <div class="mini-map" id="miniMap"></div></div>
 
       <div style="margin-top:20px"><div class="row" style="justify-content:space-between;margin-bottom:10px"><h3 style="font-size:18px">Calles y cuadras</h3><span class="muted" style="font-size:13px">${(z.cuadras || []).length} cuadras</span></div>
-        <input class="i" id="buscar" placeholder="Buscar calle…" value="${esc(S.buscar)}" style="margin-bottom:12px">
+        <div class="row" style="flex-wrap:nowrap;margin-bottom:12px"><input class="i" id="buscar" placeholder="Buscar calle…" value="${esc(S.buscar)}" style="flex:1">
+          <button class="btn sm ${S.soloPend ? 'primary' : ''}" data-a="soloPend" title="Mostrar sólo cuadras sin trabajar">${S.soloPend ? '✓ ' : ''}Pendientes</button></div>
         <div id="listaCalles"></div></div>
     </div></main>`;
     renderCalles(z, a);
     miniMapa(z, a);
+    cambioRed();
     const b = $('#buscar'); b.oninput = () => { S.buscar = b.value; renderCalles(z, a); };
   }
 
@@ -777,7 +910,7 @@
     const st = stats([a.id]);
     const porCuadra = new Map(); st.v.forEach(v => { if (!porCuadra.has(v.cuadra_id)) porCuadra.set(v.cuadra_id, []); porCuadra.get(v.cuadra_id).push(v); });
     const q = Geo.norm(S.buscar);
-    const grupos = agrupar(z.cuadras || []).filter(([c]) => !q || Geo.norm(c).includes(q));
+    const grupos = agrupar((z.cuadras || []).filter(x => !S.soloPend || !porCuadra.has(x.id))).filter(([c]) => !q || Geo.norm(c).includes(q));
     el.innerHTML = grupos.length ? grupos.map(([calle, qs]) => {
       const n = qs.reduce((s, x) => s + (porCuadra.get(x.id)?.length || 0), 0);
       return `<details class="calle" data-calle="${esc(calle)}" ${S.abiertas.has(calle) ? 'open' : ''}><summary>${esc(calle)}${qs.some(x => x.perimetral) ? '<span class="perim">LÍMITE</span>' : ''}<span class="cnt ${n ? 'on' : ''}">${n}</span></summary>
@@ -801,7 +934,7 @@
               <label class="btn sm fotobtn">📷 Agregar fotos<input type="file" accept="image/*" multiple data-fotos hidden></label>
               <div class="fotos prev" data-prev></div>
               <button class="btn primary block" style="margin-top:12px" data-a="addVisita" data-q="${cq.id}">Guardar casa</button></div>` : ''}</div></div>`; }).join('')}</details>`;
-    }).join('') : '<p class="empty">No hay calles que coincidan.</p>';
+    }).join('') : `<p class="empty">${S.soloPend && !q ? '🎉 ¡Trabajaste todas las cuadras de tu zona!' : 'No hay calles que coincidan.'}</p>`;
     el.querySelectorAll('details.calle').forEach(d => d.addEventListener('toggle', () => { d.open ? S.abiertas.add(d.dataset.calle) : S.abiertas.delete(d.dataset.calle); }));
     cargarFotos(el);
   }
@@ -829,6 +962,7 @@
     const v = t.closest('[data-v]'); if (v) { if (S.dibujo) terminarDibujo(true); cerrarSheet(); S.vista = v.dataset.v; renderAdmin(); return; }
     const f = t.closest('[data-f]'); if (f) { S.filtro = f.dataset.f; vistaZonas(); return; }
     const fop = t.closest('[data-fop]'); if (fop) { S.filtroOp = fop.dataset.fop; vistaOportunidades(); return; }
+    const per = t.closest('[data-per]'); if (per) { S.periodo = per.dataset.per; vistaAsesores(); return; }
     const tab = t.closest('[data-tab]'); if (tab) { S.tabZona = tab.dataset.tab; abrirZona(S.zonaAbierta); return; }
     const as = t.closest('[data-asig]'); if (as) { S.asigSel = as.dataset.asig; S.abiertas.clear(); S.cuadraAbierta = null; renderAsesor(); return; }
     const cq = t.closest('[data-cuadra]'); if (cq) { const id = cq.dataset.cuadra; S.cuadraAbierta = S.cuadraAbierta === id ? null : id; document.querySelectorAll('.cuadra.open').forEach(x => x.classList.remove('open')); if (S.cuadraAbierta) document.getElementById('c_' + id)?.classList.add('open'); return; }
@@ -846,7 +980,9 @@
     switch (a) {
       case 'cuenta': modalCuenta(); break;
       case 'cerrarModal': cerrarModal(); break;
-      case 'salir': cerrarModal(); destruirMapa(); cerrarSheet(); await S.be.logout(); S.yo = null; dibujarZonas._fit = false; pantallaLogin(); break;
+      case 'salir': { cerrarModal(); try { await S.be.logout(); } catch (er) { break; } destruirMapa(); cerrarSheet(); S.yo = null; S.d = null; dibujarZonas._fit = false; pantallaLogin(); break; }
+      case 'instalar': await instalar(); break;
+      case 'ocultarInstalar': try { localStorage.setItem('farming_no_instalar', '1'); } catch { } b.closest('.instalar-card')?.remove(); break;
       case 'reiniciarDemo': if (await confirmar('Borrar demo', 'Se eliminan todas las zonas y asesores de prueba de este navegador.', 'Borrar', true)) { S.be.reiniciar(); location.reload(); } break;
       case 'cambiarPass': {
         const p1 = $('#np1').value, p2 = $('#np2').value;
@@ -926,7 +1062,7 @@
         const horas = Number($('#jHoras').value), fechaJ = $('#jFecha').value;
         if (!(horas > 0 && horas <= 24)) return toast('Indicá las horas (entre 0,5 y 24)', true);
         if (!fechaJ) return toast('Elegí el día', true);
-        await conCarga(b, async () => { await S.be.agregar('jornadas', { asignacion_id: S.asigSel, fecha: fechaJ, horas, notas: $('#jNotas').value.trim() }); toast('Jornada registrada'); await refrescarAsesor(); });
+        await conCarga(b, async () => { await S.be.agregar('jornadas', { asignacion_id: S.asigSel, fecha: fechaJ, horas, notas: $('#jNotas').value.trim() }); toast(S.be.offline || !navigator.onLine ? 'Jornada guardada en el celular · se sube sola' : 'Jornada registrada'); await refrescarAsesor(); });
         break;
       }
       case 'delJornada': if (await confirmar('Borrar jornada', '¿Seguro?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('jornadas', b.dataset.id); await refrescarAsesor(); }); } break;
@@ -953,12 +1089,26 @@
           for (const f of archivos) fotos.push(await S.be.subirFoto(await comprimir(f)));
           await S.be.agregar('visitas', { asignacion_id: S.asigSel, cuadra_id: qid, calle: q.calle, altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), fecha: hoyISO(), ...venta, fotos });
           S.cuadraAbierta = qid; S.abiertas.add(q.calle);
-          toast('Casa guardada'); await refrescarAsesor();
+          toast(S.be.offline || !navigator.onLine ? 'Guardada en el celular · se sube sola cuando vuelva la señal' : 'Casa guardada'); await refrescarAsesor();
         });
         break;
       }
       case 'contactado': await conCarga(b, async () => { await S.be.editar('visitas', b.dataset.id, { ultimo_contacto: hoyISO() }); toast(`Listo. Te recordamos de nuevo en ${SEGUIR_CADA} días`); await refrescarAsesor(); }); break;
       case 'togglePend': S.verPend = !S.verPend; renderAsesor(); break;
+      case 'soloPend': { S.soloPend = !S.soloPend; const a2 = S.d.asignaciones.find(x => x.id === S.asigSel); const z2 = S.d.zonas.find(x => x.id === a2.zona_id); b.classList.toggle('primary', S.soloPend); b.textContent = (S.soloPend ? '✓ ' : '') + 'Pendientes'; renderCalles(z2, a2); break; }
+      case 'etapa': {
+        const id = b.dataset.id, et = b.dataset.e; const v = S.d.visitas.find(x => x.id === id); if (!v) break;
+        if (etapaDe(v) === et) break;
+        const textos = { contacto: 'Volver la etapa a <b>Contacto</b>.', tasacion: 'Marcar que se hizo la <b>tasación</b> de esta propiedad.', captacion: '🏆 Marcar la <b>captación firmada</b> (autorización de venta). Deja de recordarte llamarlo.' };
+        if (!await confirmar('Etapa: ' + ETAPAS.find(x => x[0] === et)[1], textos[et], 'Confirmar')) break;
+        const cambio = { etapa: et };
+        if (et === 'tasacion' && !v.tasacion_fecha) cambio.tasacion_fecha = hoyISO();
+        if (et === 'captacion') cambio.captacion_fecha = hoyISO();
+        if (et === 'contacto') { cambio.captacion_fecha = null; cambio.tasacion_fecha = null; }
+        if (et === 'tasacion') cambio.captacion_fecha = null;
+        await conCarga(null, async () => { await S.be.editar('visitas', id, cambio); toast(et === 'captacion' ? '🏆 ¡Captación registrada!' : 'Etapa actualizada'); if (S.yo.rol === 'admin') { await recargar(); renderAdmin(); if (S.zonaAbierta) abrirZona(S.zonaAbierta); } else await refrescarAsesor(); });
+        break;
+      }
       case 'delVisita': if (await confirmar('Borrar casa', '¿Seguro que querés borrar este registro?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('visitas', b.dataset.id); await refrescarAsesor(); }); } break;
     }
   });

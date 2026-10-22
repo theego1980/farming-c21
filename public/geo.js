@@ -6,9 +6,9 @@
 (function (root) {
   'use strict';
 
-  // Área de trabajo: Villa Devoto, Villa del Parque y Villa Pueyrredón (con margen)
-  const BBOX = { s: -34.637, w: -58.545, n: -34.562, e: -58.458 };
-  const BARRIOS = ['Villa Devoto', 'Villa del Parque', 'Villa Pueyrredón'];
+  // Área de trabajo: Villa Devoto, Villa del Parque, Villa Pueyrredón, La Paternal, Caballito y Flores (con margen)
+  const BBOX = { s: -34.663, w: -58.545, n: -34.562, e: -58.418 };
+  const BARRIOS = ['Villa Devoto', 'Villa del Parque', 'Villa Pueyrredón', 'La Paternal', 'Caballito', 'Flores'];
   const OVERPASS = [
     'https://overpass-api.de/api/interpreter',
     'https://overpass.kumi.systems/api/interpreter',
@@ -199,9 +199,9 @@
   }
 
   async function loadBarrios() {
-    return cached('barrios_v2', async () => {
+    return cached('barrios_v3', async () => {
       const q = `[out:json][timeout:60];
-relation["name"~"^(Villa Devoto|Villa del Parque|Villa Pueyrred[oó]n)$"]["type"~"^(boundary|multipolygon)$"](${bb(BBOX)});
+relation["name"~"^(Villa Devoto|Villa del Parque|Villa Pueyrred[oó]n|(La )?Paternal|Caballito|Flores)$"]["type"~"^(boundary|multipolygon)$"](${bb(BBOX)});
 out geom;`;
       const data = await overpass(q);
       const out = [];
@@ -339,7 +339,7 @@ out geom;`;
       if (raw.length < 3) throw new Error('Necesito al menos 3 calles que encierren la zona, en orden.');
       const ks = raw.map(s => {
         const k = this.find(s);
-        if (!k) throw new Error(`No encuentro la calle “${s}” dentro de los tres barrios.`);
+        if (!k) throw new Error(`No encuentro la calle “${s}” en los barrios de trabajo.`);
         return k;
       });
       const n = ks.length;
@@ -530,11 +530,11 @@ out geom;`;
   function hash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
 
   async function loadCallejero() {
-    const ways = await cached('calles_v2', async () => {
-      const q = `[out:json][timeout:90];
+    const ways = await cached('calles_v3', async () => {
+      const q = `[out:json][timeout:180];
 way["highway"~"^(motorway|trunk|primary|secondary|tertiary|unclassified|residential|living_street|pedestrian|primary_link|secondary_link|tertiary_link)$"]["name"](${bb(BBOX)});
 out body geom;`;
-      const data = await overpass(q, 90000);
+      const data = await overpass(q, 150000);
       return (data.elements || []).filter(e => e.type === 'way' && e.geometry && e.nodes)
         .map(e => ({ id: e.id, name: e.tags.name, nodes: e.nodes, geom: e.geometry.map(g => [+g.lat.toFixed(7), +g.lon.toFixed(7)]) }));
     });

@@ -232,3 +232,42 @@ table.t td{padding:7px 4px;border-top:1px solid var(--line)}
 .al-acc{display:flex;gap:6px}
 .nav .dot.warn{background:var(--warn);color:var(--bg)}
 @media (prefers-reduced-motion:reduce){.alerta-llamar{animation:none}}
+
+/* ---------- v3: etapas, WhatsApp, cobertura, equipo ---------- */
+.etapas{display:flex;align-items:center;gap:4px;flex-wrap:wrap;margin-top:6px}
+.et{background:var(--bg);border:1px solid var(--line2);color:var(--tx3);border-radius:20px;padding:5px 10px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;gap:5px;align-items:center}
+.et small{font-weight:500;opacity:.8}
+.et:disabled{cursor:default}
+.et.hecha{color:var(--tx2);border-color:var(--line2)}
+.et.actual{color:var(--bg);background:var(--gold);border-color:var(--gold)}
+.et-sep{color:var(--tx3);font-size:12px}
+.captada{margin-top:6px;padding:7px 10px;border-radius:8px;background:rgba(190,175,135,.16);color:var(--gold2);font-weight:700;font-size:13px}
+.btn.wa{background:#1f7a4d;border-color:#1f7a4d;color:#fff}
+.btn.wa:hover{background:#25a35f;border-color:#25a35f}
+.cob{margin-top:14px}
+.cob-h{display:flex;justify-content:space-between;font-size:13px;font-weight:600;color:var(--tx2)}
+.cob-h b{color:var(--gold);font-size:16px}
+.cob small{color:var(--tx3);font-size:12px}
+.bar.cobbar{margin:6px 0 4px}
+.bar.cobbar i{background:linear-gradient(90deg,var(--gold),var(--gold2))}
+.embudo{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:12px;font-size:12px;color:var(--tx3)}
+.embudo span b{color:var(--tx);font-size:14px}
+.embudo .cap b{color:var(--gold)}
+.stats.six{grid-template-columns:repeat(6,1fr)}
+@media (max-width:640px){.stats.six{grid-template-columns:repeat(3,1fr)}}
+.gold-stat b{color:var(--gold)}
+.metr{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:12px}
+.metr > div{background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:8px 9px;min-width:0}
+.metr span{display:block;font-size:10px;font-weight:700;letter-spacing:.4px;color:var(--tx3);text-transform:uppercase}
+.metr b{font-size:18px}
+.metr .cap b{color:var(--gold)}
+.mb{display:block;height:4px;background:var(--card2);border-radius:3px;margin-top:5px;overflow:hidden}
+.mb em{display:block;height:100%;background:var(--gold)}
+@media (max-width:760px){.metr{grid-template-columns:repeat(4,1fr)}}
+@media (max-width:420px){.metr{grid-template-columns:repeat(3,1fr)}}
+
+/* ---------- v3: app instalable y sin señal ---------- */
+.netchip{font-size:11px;font-weight:700;padding:4px 8px;border-radius:12px;background:var(--golddim);color:var(--gold);white-space:nowrap}
+.netchip.off{background:rgba(233,180,76,.18);color:var(--warn)}
+.instalar-card{border-color:rgba(190,175,135,.45)}
+ol.pasos{padding-left:20px;line-height:1.7;margin:8px 0 12px}
