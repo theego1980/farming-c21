@@ -7,6 +7,8 @@
   --top:58px;
   --sans:Montserrat,Arial,Helvetica,sans-serif; --serif:Georgia,"Times New Roman",serif;
   --safe-b:env(safe-area-inset-bottom,0px);
+  --safe-t:env(safe-area-inset-top,0px);
+  --hd:calc(var(--top) + var(--safe-t));
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:15px;-webkit-font-smoothing:antialiased}
@@ -17,7 +19,7 @@ a{color:var(--gold)}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* ---------- Top bar ---------- */
-.top{position:fixed;inset:0 0 auto 0;height:var(--top);display:flex;align-items:center;gap:12px;padding:0 14px;background:rgba(11,11,12,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);z-index:1000}
+.top{position:fixed;inset:0 0 auto 0;height:var(--hd);display:flex;align-items:center;gap:12px;padding:var(--safe-t) 14px 0;background:rgba(11,11,12,.94);backdrop-filter:blur(10px);border-bottom:1px solid var(--line);z-index:1000}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .brand-logo{height:30px;width:auto;display:block;flex:none}
 .brand-sep{width:1px;height:26px;background:var(--line2);flex:none}
@@ -32,6 +34,8 @@ a{color:var(--gold)}
 .iconbtn{background:var(--card);border:1px solid var(--line);width:38px;height:38px;border-radius:10px;display:grid;place-items:center;cursor:pointer;color:var(--tx2);flex:none}
 .chip-demo{font-size:10px;font-weight:800;letter-spacing:1.5px;color:var(--bg);background:var(--warn);padding:3px 7px;border-radius:6px}
 @media (max-width:640px){
+  .top{backdrop-filter:none;-webkit-backdrop-filter:none;background:var(--bg)}
+  .top > .iconbtn{margin-left:auto}
   .brand small{display:none}
   .brand-logo{height:24px}
   .nav{position:fixed;left:0;right:0;bottom:0;margin:0;background:rgba(11,11,12,.97);border-top:1px solid var(--line);padding:6px 8px calc(6px + var(--safe-b));justify-content:space-around;z-index:1000}
@@ -40,7 +44,7 @@ a{color:var(--gold)}
   body.has-nav .map-wrap{bottom:calc(60px + var(--safe-b))}
 }
 
-main{padding-top:var(--top)}
+main{padding-top:var(--hd)}
 .wrap{max-width:980px;margin:0 auto;padding:18px 14px 40px}
 h1,h2,h3{margin:0;font-weight:700}
 h2{font-size:20px}
@@ -94,7 +98,7 @@ textarea.i{min-height:64px;resize:vertical}
 .bar.warn i{background:var(--warn)} .bar.bad i{background:var(--bad)}
 
 /* ---------- Map ---------- */
-.map-wrap{position:fixed;top:var(--top);left:0;right:0;bottom:0}
+.map-wrap{position:fixed;top:var(--hd);left:0;right:0;bottom:0}
 #map{position:absolute;inset:0;background:#1a1a1a}
 .leaflet-container{font-family:var(--sans)}
 .map-tools{position:absolute;top:12px;left:12px;z-index:500;display:flex;flex-direction:column;gap:8px;max-width:calc(100% - 70px)}
@@ -109,16 +113,20 @@ textarea.i{min-height:64px;resize:vertical}
 .leaflet-control-attribution{font-size:10px}
 
 /* ---------- Sheet (panel lateral / inferior) ---------- */
-.sheet{position:fixed;z-index:1100;background:var(--bg2);border-left:1px solid var(--line);top:var(--top);right:0;bottom:0;width:440px;max-width:100%;transform:translateX(105%);transition:transform .25s ease;display:flex;flex-direction:column}
+.sheet{position:fixed;z-index:1100;background:var(--bg2);border-left:1px solid var(--line);top:var(--hd);right:0;bottom:0;width:440px;max-width:100%;transform:translateX(105%);transition:transform .25s ease;display:flex;flex-direction:column}
 .sheet.open{transform:none}
 .sheet-grip{display:none}
 .sheet-body{overflow:auto;padding:16px 16px calc(30px + var(--safe-b));flex:1;-webkit-overflow-scrolling:touch}
 .sheet-head{display:flex;align-items:flex-start;gap:10px;margin-bottom:14px}
 .sheet-head h2{flex:1;font-size:19px;line-height:1.25}
 @media (max-width:640px){
-  .sheet{top:auto;left:0;width:100%;height:78vh;border-left:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;transform:translateY(105%);z-index:1100}
-  .sheet.tall{height:calc(100vh - var(--top))}
-  .sheet-grip{display:block;width:40px;height:4px;border-radius:2px;background:var(--line2);margin:8px auto 0;flex:none}
+  .sheet{top:auto;left:0;width:100%;height:78vh;height:78dvh;border-left:0;border-top:1px solid var(--line);border-radius:18px 18px 0 0;transform:translateY(105%);z-index:1100}
+  .sheet.tall{top:calc(var(--hd) + 6px);height:auto}
+  .sheet-grip{display:block;width:100%;height:22px;flex:none;cursor:pointer;position:relative;background:none;border:0}
+  .sheet-grip::after{content:'';position:absolute;left:50%;top:9px;width:44px;height:5px;margin-left:-22px;border-radius:3px;background:var(--line2)}
+  /* encabezado fijo: la cruz siempre queda a mano aunque se baje en la hoja */
+  .sheet-head{position:sticky;top:-16px;z-index:5;margin:-16px -16px 14px;padding:12px 16px;background:var(--bg2);border-bottom:1px solid var(--line);align-items:center}
+  .sheet-head .iconbtn{width:44px;height:44px;font-size:18px}
 }
 
 /* ---------- Modal ---------- */

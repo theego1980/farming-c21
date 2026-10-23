@@ -130,12 +130,22 @@
   }
   function abrirSheet(html, tall) {
     $('#sheetBody').innerHTML = html;
+    $('#sheetBody').scrollTop = 0;
     const s = $('#sheet'); s.classList.add('open'); s.classList.toggle('tall', !!tall); s.setAttribute('aria-hidden', 'false');
+    // el gesto/botón "atrás" del celular cierra la hoja en lugar de salir de la app
+    if (!S.hojaEnHistorial) { try { history.pushState({ hoja: 1 }, ''); S.hojaEnHistorial = true; } catch { } }
   }
-  function cerrarSheet() {
+  function cerrarSheet(desdeAtras) {
     $('#sheet').classList.remove('open'); $('#sheet').setAttribute('aria-hidden', 'true');
     S.zonaAbierta = null; limpiarCapa('cuadras'); limpiarCapa('preview');
+    if (S.hojaEnHistorial) { S.hojaEnHistorial = false; if (desdeAtras !== true) { try { history.back(); } catch { } } }
   }
+  window.addEventListener('popstate', () => {
+    if ($('#modal').classList.contains('open')) cerrarModal();
+    if (S.hojaEnHistorial) { S.hojaEnHistorial = false; if ($('#sheet').classList.contains('open')) { S.nueva = null; if (S.dibujo) terminarDibujo(true); cerrarSheet(true); } }
+  });
+  document.addEventListener('DOMContentLoaded', () => { const g = $('.sheet-grip'); if (g) { g.dataset.a = 'cerrarSheet'; g.title = 'Cerrar'; } });
+  { const g = document.querySelector('.sheet-grip'); if (g) { g.dataset.a = 'cerrarSheet'; g.title = 'Cerrar'; } }
   async function conCarga(btn, fn) {
     const t = btn ? btn.innerHTML : null;
     if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px"></span>'; }
