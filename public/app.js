@@ -229,7 +229,9 @@
     const ms = new Date(a.vence).getTime() - ahora();
     if (ms <= 0) return { v: 0, u: 'días', txt: 'Vencida', ms };
     if (ms < DIA) return { v: Math.ceil(ms / 3600e3), u: 'horas', txt: `${Math.ceil(ms / 3600e3)} h`, ms };
-    const d = Math.ceil(ms / DIA);
+    // días de calendario: de hoy a la fecha de vencimiento (baja uno cada medianoche)
+    const dia = x => { const t = new Date(x); return Date.UTC(t.getFullYear(), t.getMonth(), t.getDate()); };
+    const d = Math.max(1, Math.round((dia(a.vence) - dia(ahora())) / DIA));
     return { v: d, u: d === 1 ? 'día' : 'días', txt: `${d} ${d === 1 ? 'día' : 'días'}`, ms };
   }
   function pct(a) { const tot = new Date(a.vence) - new Date(a.inicio); return Math.max(0, Math.min(100, 100 * (new Date(a.vence) - ahora()) / (tot || 1))); }
