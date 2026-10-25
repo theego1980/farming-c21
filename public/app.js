@@ -864,18 +864,21 @@
     const el = $('#vista');
     const B = S.bus = S.bus || { q: '', calle: '', cuadra: '', zona: '', asesor: '', cat: 'todos', orden: 'reciente', n: 40 };
     const zonaDeVisita = v => { const a = S.d.asignaciones.find(x => x.id === v.asignacion_id); return a ? S.d.zonas.find(z => z.id === a.zona_id) : null; };
-    const calles = [...new Set(S.d.visitas.map(v => v.calle).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
-    const cuadrasCalle = B.calle ? [...new Map(S.d.visitas.filter(v => v.calle === B.calle).map(v => { const { q } = zonaYCuadraDe(v); return [v.cuadra_id, q]; })).entries()]
+    const universo = contactosVisibles();
+    const calles = [...new Set(universo.map(v => v.calle).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const cuadrasCalle = B.calle ? [...new Map(universo.filter(v => v.calle === B.calle).map(v => { const { q } = zonaYCuadraDe(v); return [v.cuadra_id, q]; })).entries()]
       .sort((a, b) => ((a[1] && a[1].desde) ?? 1e9) - ((b[1] && b[1].desde) ?? 1e9)) : [];
     const ases = S.d.perfiles.filter(p => p.rol !== 'admin').sort((a, b) => nombre(a).localeCompare(nombre(b), 'es'));
-    el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>Contactos</h2><button class="btn sm" data-a="csvBusqueda">Exportar CSV</button></div>
+    const adm = esAdmin();
+    const misZonas = adm ? S.d.zonas : S.d.zonas.filter(z => S.d.asignaciones.some(a => a.zona_id === z.id && a.asesor_id === S.yo.id));
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>${adm ? 'Contactos' : 'Mis contactos'}</h2><button class="btn sm" data-a="csvBusqueda">Exportar CSV</button></div>
       <div class="buscador card">
         <input class="i" id="bQ" placeholder="🔎 Buscar por nombre, teléfono, inmobiliaria o nota…" value="${esc(B.q)}" autocomplete="off">
         <div class="bgrid">
           <select class="i" data-b="calle"><option value="">Todas las calles</option>${calles.map(c => `<option ${B.calle === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
           <select class="i" data-b="cuadra" ${B.calle ? '' : 'disabled'}><option value="">${B.calle ? 'Todas las cuadras' : 'Cuadra (elegí calle)'}</option>${cuadrasCalle.map(([id, q]) => `<option value="${id}" ${B.cuadra === id ? 'selected' : ''}>${esc(etiquetaCuadra(q))}${q && q.entre && q.entre.filter(Boolean).length === 2 ? ` · e/ ${esc(q.entre[0])} y ${esc(q.entre[1])}` : ''}</option>`).join('')}</select>
-          <select class="i" data-b="zona"><option value="">Todas las zonas</option>${S.d.zonas.map(z => `<option value="${z.id}" ${B.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select>
-          <select class="i" data-b="asesor"><option value="">Todos los asesores</option>${ases.map(p => `<option value="${p.id}" ${B.asesor === p.id ? 'selected' : ''}>${esc(nombre(p))}</option>`).join('')}</select>
+          ${adm || misZonas.length > 1 ? `<select class="i" data-b="zona"><option value="">Todas las zonas</option>${misZonas.map(z => `<option value="${z.id}" ${B.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select>` : ''}
+          ${adm ? `<select class="i" data-b="asesor"><option value="">Todos los asesores</option>${ases.map(p => `<option value="${p.id}" ${B.asesor === p.id ? 'selected' : ''}>${esc(nombre(p))}</option>`).join('')}</select>` : ''}
           <select class="i" data-b="orden">${[['reciente', 'Más recientes'], ['antiguo', 'Más antiguos'], ['calle', 'Por calle y altura'], ['venta', 'Más tiempo en venta']].map(([k, t]) => `<option value="${k}" ${B.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
           <button class="btn sm ghost" data-a="limpiarBusqueda">Limpiar filtros</button>
         </div>
@@ -885,12 +888,14 @@
     pintarResultados();
     $('#bQ').oninput = () => { B.q = $('#bQ').value; B.n = 40; pintarResultados(); };
   }
+  // El broker ve todo; el asesor, sólo los contactos que cargó él
+  const contactosVisibles = () => esAdmin() ? S.d.visitas : S.d.visitas.filter(v => v.asesor_id === S.yo.id);
   function filtrarContactos() {
     const B = S.bus;
     const activas = new Set(S.d.asignaciones.filter(a => estadoAsig(a) === 'activa').map(a => a.id));
     const zonaAsig = new Map(S.d.asignaciones.map(a => [a.id, a.zona_id]));
     const t = Geo.norm(B.q), td = B.q.replace(/\D/g, '');
-    const base = S.d.visitas.filter(v => {
+    const base = contactosVisibles().filter(v => {
       if (B.calle && v.calle !== B.calle) return false;
       if (B.cuadra && v.cuadra_id !== B.cuadra) return false;
       if (B.zona && zonaAsig.get(v.asignacion_id) !== B.zona) return false;
@@ -918,7 +923,8 @@
     const vis = lista.slice(0, B.n);
     $('#bRes').innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 8px">${lista.length} ${lista.length === 1 ? 'contacto' : 'contactos'}</p>
       ${vis.length ? `<div class="zl">${vis.map(v => { const { a, z } = zonaDe(v); const { q } = zonaYCuadraDe(v); const fin = a && estadoAsig(a) === 'finalizada';
-        return tarjetaVisita(v, { extra: `<div class="muted" style="font-size:12px;margin-top:4px">${esc(v.calle)} ${esc(etiquetaCuadra(q))} · ${z ? `<a href="#" data-zona="${z.id}">${esc(z.nombre)}</a> · ` : ''}${esc(nombre(perfil(v.asesor_id)))}${fin ? ' · gestión anterior' : ''} · cargado el ${fecha(v.creado || v.fecha)}</div>` }); }).join('')}</div>
+        const adm = esAdmin();
+        return tarjetaVisita(v, { calle: v.calle, puede: !adm && a && estadoAsig(a) === 'activa', extra: `<div class="muted" style="font-size:12px;margin-top:4px">${esc(v.calle)} ${esc(etiquetaCuadra(q))} · ${z ? (adm ? `<a href="#" data-zona="${z.id}">${esc(z.nombre)}</a> · ` : `${esc(z.nombre)} · `) : ''}${adm ? esc(nombre(perfil(v.asesor_id))) + ' · ' : ''}${fin ? 'gestión anterior · ' : ''}cargado el ${fecha(v.creado || v.fecha)}</div>` }); }).join('')}</div>
         ${lista.length > vis.length ? `<button class="btn block" style="margin-top:12px" data-a="verMasBusqueda">Ver ${Math.min(40, lista.length - vis.length)} más (quedan ${lista.length - vis.length})</button>` : ''}`
       : '<div class="empty"><b>No hay contactos con esos filtros</b>Probá cambiar la búsqueda o tocá “Limpiar filtros”.</div>'}`;
     cargarFotos($('#bRes'));
@@ -995,6 +1001,11 @@
       $('#app').innerHTML = topbar() + `<main><div class="wrap"><div class="empty"><b>Hola ${esc(S.yo.nombre)}</b>No tenés zonas asignadas en este momento.</div></div></main>`;
       return;
     }
+    const tabsAsesor = `<div class="tabs asesor-tabs"><button class="${S.asesorTab !== 'contactos' ? 'on' : ''}" data-atab="zona">🗺 Mi zona</button><button class="${S.asesorTab === 'contactos' ? 'on' : ''}" data-atab="contactos">🔎 Mis contactos</button></div>`;
+    if (S.asesorTab === 'contactos') {
+      $('#app').innerHTML = topbar() + `<main><div class="wrap">${tabsAsesor}<div id="vista"></div></div></main>`;
+      vistaOportunidades(); cambioRed(); return;
+    }
     const z = S.d.zonas.find(x => x.id === a.zona_id);
     const e = estadoAsig(a), r = restante(a), pronto = e === 'activa' && r.ms < 10 * DIA;
     const st = stats([a.id]);
@@ -1011,6 +1022,7 @@
         <div class="al-acc">${v.telefono ? `<a class="btn sm" href="tel:${esc(v.telefono)}">📞 Llamar</a>` : ''}${btnWA(v)}<button class="btn sm primary" data-a="contactado" data-id="${v.id}">✓ Contactado</button></div></div>`; }).join('')}</div>` : ''}
     </div>` : '';
     $('#app').innerHTML = topbar() + `<main><div class="wrap">
+      ${tabsAsesor}
       ${vig.length > 1 ? `<div class="filters">${vig.map(x => `<button class="${x.id === a.id ? 'on' : ''}" data-asig="${x.id}">${esc(S.d.zonas.find(z => z.id === x.zona_id)?.nombre || 'Zona')}</button>`).join('')}</div>` : ''}
       ${banner}
       ${sugerirInstalar() ? `<div class="card instalar-card"><div class="row" style="flex-wrap:nowrap;gap:12px"><img src="icono-192.png" alt="" width="44" height="44" style="border-radius:10px">
@@ -1176,6 +1188,7 @@
     const v = t.closest('[data-v]'); if (v) { if (S.dibujo) terminarDibujo(true); cerrarSheet(); S.vista = v.dataset.v; renderAdmin(); return; }
     const f = t.closest('[data-f]'); if (f) { S.filtro = f.dataset.f; vistaZonas(); return; }
     const cat = t.closest('[data-cat]'); if (cat) { S.bus.cat = cat.dataset.cat; S.bus.n = 40; pintarResultados(); return; }
+    const at = t.closest('[data-atab]'); if (at) { S.asesorTab = at.dataset.atab; window.scrollTo(0, 0); renderAsesor(); return; }
     const per = t.closest('[data-per]'); if (per) { S.periodo = per.dataset.per; vistaAsesores(); return; }
     const tab = t.closest('[data-tab]'); if (tab) { S.tabZona = tab.dataset.tab; abrirZona(S.zonaAbierta); return; }
     const as = t.closest('[data-asig]'); if (as) { S.asigSel = as.dataset.asig; S.abiertas.clear(); S.cuadraAbierta = null; renderAsesor(); return; }
