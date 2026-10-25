@@ -338,9 +338,3 @@ ol.pasos{padding-left:20px;line-height:1.7;margin:8px 0 12px}
 
 .asesor-tabs{margin-top:0}
 
-.bf{display:flex;flex-direction:column;gap:4px;min-width:0}
-.bf > span{font-size:11px;font-weight:700;letter-spacing:.4px;color:var(--gold);text-transform:uppercase}
-.bf .btn{height:100%;min-height:40px}
-
-.bf.ancho{grid-column:span 2}
-@media (max-width:640px){.bf.ancho{grid-column:1/-1}}

@@ -3,13 +3,13 @@
    - Librerías y tipografías: copia guardada.
    - Mapa (tiles de OpenStreetMap): se guardan los que ya se vieron, para que el mapa de la zona se vea sin señal.
    - Datos (Supabase, /api): nunca se guardan acá; los maneja la app. */
-const VERSION = 'farming-v3';
+const VERSION = 'farming-2026.10.25';
 const APP = 'app-' + VERSION, LIBS = 'libs-v1', TILES = 'tiles-v1';
 const SHELL = ['/', '/index.html', '/app.js', '/data.js', '/geo.js', '/styles.css', '/logo.png', '/icono.png', '/icono-192.png', '/manifest.webmanifest'];
 const MAX_TILES = 800;
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(APP).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(APP).then(c => c.addAll(SHELL.map(u => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', e => {
@@ -20,7 +20,8 @@ self.addEventListener('activate', e => {
 
 async function redPrimero(req, cache, fallback) {
   try {
-    const r = await fetch(req);
+    // siempre la versión del servidor (sin la caché del navegador), así los cambios llegan enseguida
+    const r = await fetch(req.url, { cache: 'no-store', credentials: 'same-origin' });
     if (r && r.ok) (await caches.open(cache)).put(req, r.clone());
     return r;
   } catch (e) {

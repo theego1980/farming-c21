@@ -7,6 +7,7 @@
   const COLORES = ['#BEAF87', '#5B8DEF', '#E07A5F', '#81B29A', '#C38FD8', '#F2CC8F', '#4FB0C6', '#E76F9A', '#7FB069', '#B0A8E8', '#E9B44C', '#9AA0A6'];
   const RESULTADOS = ['Interesado en vender', 'No quiere vender', 'Interesado en tasar', 'Contacto con propietario', 'Volver a visitar', 'No atendió', 'Inquilino'];
   const SEGUIR_CADA = 15; // días entre recordatorios de seguimiento
+  const VERSION_APP = '2026.10.25';
   const CENTRO = [-34.608, -58.48];
 
   const S = { be: null, yo: null, d: null, vista: 'mapa', filtro: 'todas', barrios: [], callejero: null, callejeroP: null,
@@ -182,8 +183,32 @@
   }
 
   // ---------------- App instalable y modo sin señal ----------------
+  // App instalable: se fija si hay versión nueva al abrir y cada vez que vuelve a primer plano; si la hay, se recarga sola
   function registrarSW() {
-    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) navigator.serviceWorker.register('/sw.js').catch(e => console.warn('SW', e));
+    if (!('serviceWorker' in navigator) || !(location.protocol === 'https:' || location.hostname === 'localhost')) return;
+    const habia = !!navigator.serviceWorker.controller;
+    let recargando = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!habia || recargando) return;
+      const ocupado = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('#modal').classList.contains('open');
+      if (ocupado) { S.actualizacionPendiente = true; toast('Hay una versión nueva: se aplica al volver a abrir la app'); return; }
+      recargando = true; location.reload();
+    });
+    // ¿Se publicó una versión nueva? (compara la marca del archivo app.js en el servidor)
+    const marca = async () => { try { const r = await fetch('/app.js', { method: 'HEAD', cache: 'no-store' }); return r.ok ? (r.headers.get('etag') || r.headers.get('last-modified')) : null; } catch { return null; } };
+    marca().then(m => { S.marcaApp = m; });
+    const hayNueva = async () => {
+      const m = await marca();
+      if (!m || !S.marcaApp || m === S.marcaApp) return;
+      const ocupado = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName) || $('#modal').classList.contains('open');
+      if (ocupado) { S.actualizacionPendiente = true; return; }
+      location.reload();
+    };
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then(reg => {
+      const revisar = () => { reg.update().catch(() => { }); hayNueva(); };
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (S.actualizacionPendiente) location.reload(); else revisar(); } });
+      setInterval(revisar, 15 * 60e3);
+    }).catch(e => console.warn('SW', e));
   }
   window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); S.promptInstalar = e; });
   window.addEventListener('appinstalled', () => { S.promptInstalar = null; toast('¡App instalada!'); document.querySelector('.instalar-card')?.remove(); });
@@ -334,13 +359,15 @@
   }
 
   function modalCuenta() {
-    modal(`<h3>Mi cuenta</h3><p class="muted" style="margin:0">${esc(nombre(S.yo))} · ${esc(S.yo.email)}</p>
+    const nom = `${S.yo.nombre || ''} ${S.yo.apellido || ''}`.trim();
+    modal(`<h3>Mi cuenta</h3><p class="muted" style="margin:0">${nom ? esc(nom) + ' · ' : ''}${esc(S.yo.email)}</p>
       ${S.be.modo === 'supabase' ? `<label class="f">Nueva contraseña</label><input class="i" type="password" id="np1" minlength="6">
       <label class="f">Repetila</label><input class="i" type="password" id="np2" minlength="6">
       <button class="btn block" style="margin-top:12px" data-a="cambiarPass">Cambiar contraseña</button>` : ''}
       ${S.be.modo === 'demo' && S.yo.rol === 'admin' ? '<button class="btn danger block" style="margin-top:12px" data-a="reiniciarDemo">Borrar datos de la demostración</button>' : ''}
       ${!instalada() ? `<button class="btn block" style="margin-top:12px" data-a="instalar">📲 Instalar la app en este dispositivo</button>` : ''}
-      <div class="row" style="margin-top:16px;justify-content:space-between"><button class="btn ghost" data-a="cerrarModal">Cerrar</button><button class="btn danger" data-a="salir">Cerrar sesión</button></div>`);
+      <div class="row" style="margin-top:16px;justify-content:space-between"><button class="btn ghost" data-a="cerrarModal">Cerrar</button><button class="btn danger" data-a="salir">Cerrar sesión</button></div>
+      <p class="muted" style="font-size:11px;text-align:center;margin:14px 0 0">Versión ${VERSION_APP}</p>`);
   }
 
   // =====================================================================
@@ -882,13 +909,13 @@
       <div class="buscador card">
         <input class="i" id="bQ" placeholder="🔎 Buscar por nombre, teléfono, inmobiliaria o nota…" value="${esc(B.q)}" autocomplete="off">
         <div class="bgrid">
-          <label class="bf"><span>Calle</span><select class="i" data-b="calle"><option value="">Todas las calles (${calles.length})</option>${calles.map(c => `<option value="${esc(c)}" ${B.calle === c ? 'selected' : ''}>${esc(c)}${nPorCalle.get(c) ? ` · ${nPorCalle.get(c)}` : ''}</option>`).join('')}</select></label>
-          <label class="bf"><span>Cuadra</span><select class="i" data-b="cuadra" ${B.calle ? '' : 'disabled'}><option value="">${B.calle ? 'Todas las cuadras' : 'Cuadra (elegí calle)'}</option>${cuadrasCalle.map(({ q, z }) => `<option value="${q.id}" ${B.cuadra === q.id ? 'selected' : ''}>${esc(etiquetaCuadra(q))}${q.entre && q.entre.filter(Boolean).length === 2 ? ` · e/ ${esc(q.entre[0])} y ${esc(q.entre[1])}` : ''}${variasZonas ? ` · ${esc(z.nombre)}` : ''}${nPorCuadra.get(q.id) ? ` · ${nPorCuadra.get(q.id)}` : ''}</option>`).join('')}</select></label>
-          ${adm || misZonas.length > 1 ? `<label class="bf"><span>Zona</span><select class="i" data-b="zona"><option value="">Todas las zonas</option>${misZonas.map(z => `<option value="${z.id}" ${B.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select></label>` : ''}
-          ${adm ? `<label class="bf"><span>Asesor</span><select class="i" data-b="asesor"><option value="">Todos los asesores</option>${ases.map(p => `<option value="${p.id}" ${B.asesor === p.id ? 'selected' : ''}>${esc(nombre(p))}</option>`).join('')}</select></label>` : ''}
-          <label class="bf ancho"><span>Categoría</span><select class="i" data-b="cat" id="bCatSel">${CATS.map(([k]) => `<option value="${k}" ${B.cat === k ? 'selected' : ''}>${CAT_TXT[k]}</option>`).join('')}</select></label>
-          <label class="bf"><span>Ordenar por</span><select class="i" data-b="orden">${[['reciente', 'Más recientes'], ['antiguo', 'Más antiguos'], ['calle', 'Por calle y altura'], ['venta', 'Más tiempo en venta']].map(([k, t]) => `<option value="${k}" ${B.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-          <label class="bf"><span>&nbsp;</span><button class="btn sm ghost" data-a="limpiarBusqueda">Limpiar filtros</button></label>
+          <select class="i" data-b="calle"><option value="">Todas las calles (${calles.length})</option>${calles.map(c => `<option value="${esc(c)}" ${B.calle === c ? 'selected' : ''}>${esc(c)}${nPorCalle.get(c) ? ` · ${nPorCalle.get(c)}` : ''}</option>`).join('')}</select>
+          <select class="i" data-b="cuadra" ${B.calle ? '' : 'disabled'}><option value="">${B.calle ? 'Todas las cuadras' : 'Cuadra (elegí calle)'}</option>${cuadrasCalle.map(({ q, z }) => `<option value="${q.id}" ${B.cuadra === q.id ? 'selected' : ''}>${esc(etiquetaCuadra(q))}${q.entre && q.entre.filter(Boolean).length === 2 ? ` · e/ ${esc(q.entre[0])} y ${esc(q.entre[1])}` : ''}${variasZonas ? ` · ${esc(z.nombre)}` : ''}${nPorCuadra.get(q.id) ? ` · ${nPorCuadra.get(q.id)}` : ''}</option>`).join('')}</select>
+          ${adm || misZonas.length > 1 ? `<select class="i" data-b="zona"><option value="">Todas las zonas</option>${misZonas.map(z => `<option value="${z.id}" ${B.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select>` : ''}
+          ${adm ? `<select class="i" data-b="asesor"><option value="">Todos los asesores</option>${ases.map(p => `<option value="${p.id}" ${B.asesor === p.id ? 'selected' : ''}>${esc(nombre(p))}</option>`).join('')}</select>` : ''}
+          <select class="i" data-b="cat" id="bCatSel">${CATS.map(([k]) => `<option value="${k}" ${B.cat === k ? 'selected' : ''}>${CAT_TXT[k]}</option>`).join('')}</select>
+          <select class="i" data-b="orden">${[['reciente', 'Más recientes'], ['antiguo', 'Más antiguos'], ['calle', 'Por calle y altura'], ['venta', 'Más tiempo en venta']].map(([k, t]) => `<option value="${k}" ${B.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <button class="btn sm ghost" data-a="limpiarBusqueda">Limpiar filtros</button>
         </div>
       </div>
       <div class="filters" id="bCats"></div>
