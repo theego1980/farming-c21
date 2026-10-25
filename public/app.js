@@ -844,7 +844,8 @@
   }
 
   // ---------- Vista: contactos (buscador) ----------
-  const CATS = [['todos', 'Todos'], ['oport', '⭐ Oportunidades'], ['ven', '🚨 Quieren vender'], ['col', CARTEL.replace('class="cartel"', 'class="cartel chip-ic"') + ' En venta con colega'], ['tasar', 'Quieren tasar'], ['tas', '💰 Tasaciones'], ['cap', '🏆 Captaciones'], ['pend', '☎ Llamados pendientes'], ['no', 'No quieren vender'], ['otros', 'Otros']];
+  const CATS = [['todos', 'Todos'], ['oport', '⭐ Oportunidades'], ['ven', '🚨 Con intención de vender'], ['col', CARTEL.replace('class="cartel"', 'class="cartel chip-ic"') + ' En venta con firma colega'], ['tasar', 'Interesado en tasar'], ['tas', '💰 Tasación hecha'], ['cap', '🏆 Captación'], ['pend', '☎ Llamados pendientes'], ['no', 'No quiere vender'], ['otros', 'Otros']];
+  const CAT_TXT = { todos: 'Todas las categorías', oport: '⭐ Oportunidades (todas)', ven: '🚨 Con intención de vender', col: 'En venta con firma colega', tasar: 'Interesado en tasar', tas: '💰 Tasación hecha', cap: '🏆 Captación', pend: '☎ Llamados pendientes', no: 'No quiere vender', otros: 'Otros' };
   function enCategoria(v, k, activas) {
     const ven = v.resultado === 'Interesado en vender' && v.etapa !== 'captacion';
     const col = !!v.en_venta_colega && v.etapa !== 'captacion';
@@ -885,6 +886,7 @@
           <select class="i" data-b="cuadra" ${B.calle ? '' : 'disabled'}><option value="">${B.calle ? 'Todas las cuadras' : 'Cuadra (elegí calle)'}</option>${cuadrasCalle.map(({ q, z }) => `<option value="${q.id}" ${B.cuadra === q.id ? 'selected' : ''}>${esc(etiquetaCuadra(q))}${q.entre && q.entre.filter(Boolean).length === 2 ? ` · e/ ${esc(q.entre[0])} y ${esc(q.entre[1])}` : ''}${variasZonas ? ` · ${esc(z.nombre)}` : ''}${nPorCuadra.get(q.id) ? ` · ${nPorCuadra.get(q.id)}` : ''}</option>`).join('')}</select>
           ${adm || misZonas.length > 1 ? `<select class="i" data-b="zona"><option value="">Todas las zonas</option>${misZonas.map(z => `<option value="${z.id}" ${B.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select>` : ''}
           ${adm ? `<select class="i" data-b="asesor"><option value="">Todos los asesores</option>${ases.map(p => `<option value="${p.id}" ${B.asesor === p.id ? 'selected' : ''}>${esc(nombre(p))}</option>`).join('')}</select>` : ''}
+          <select class="i" data-b="cat" id="bCatSel">${CATS.map(([k]) => `<option value="${k}" ${B.cat === k ? 'selected' : ''}>${CAT_TXT[k]}</option>`).join('')}</select>
           <select class="i" data-b="orden">${[['reciente', 'Más recientes'], ['antiguo', 'Más antiguos'], ['calle', 'Por calle y altura'], ['venta', 'Más tiempo en venta']].map(([k, t]) => `<option value="${k}" ${B.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
           <button class="btn sm ghost" data-a="limpiarBusqueda">Limpiar filtros</button>
         </div>
@@ -925,6 +927,7 @@
   function pintarResultados() {
     const B = S.bus; const { lista, conteo } = filtrarContactos();
     $('#bCats').innerHTML = CATS.map(([k, t]) => `<button class="${B.cat === k ? 'on' : ''}" data-cat="${k}">${t} (${conteo[k]})</button>`).join('');
+    const sel = $('#bCatSel'); if (sel) sel.innerHTML = CATS.map(([k]) => `<option value="${k}" ${B.cat === k ? 'selected' : ''}>${CAT_TXT[k]} (${conteo[k]})</option>`).join('');
     const zonaDe = v => { const a = S.d.asignaciones.find(x => x.id === v.asignacion_id); return { a, z: a ? S.d.zonas.find(z => z.id === a.zona_id) : null }; };
     const vis = lista.slice(0, B.n);
     $('#bRes').innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 8px">${lista.length} ${lista.length === 1 ? 'contacto' : 'contactos'}</p>
