@@ -355,7 +355,7 @@
     const nav = `<nav class="nav">
       <button class="${S.vista === 'mapa' ? 'on' : ''}" data-v="mapa">Mapa</button>
       <button class="${S.vista === 'zonas' ? 'on' : ''}" data-v="zonas">Zonas${nv ? `<span class="dot">${nv}</span>` : ''}</button>
-      <button class="${S.vista === 'oport' ? 'on' : ''}" data-v="oport">Oportunidades${np ? `<span class="dot warn">${np}</span>` : ''}</button>
+      <button class="${S.vista === 'oport' ? 'on' : ''}" data-v="oport">Contactos${np ? `<span class="dot warn">${np}</span>` : ''}</button>
       <button class="${S.vista === 'asesores' ? 'on' : ''}" data-v="asesores">Equipo</button></nav>`;
     if (S.vista === 'mapa') {
       if (!S.map || !document.getElementById('map')) {
@@ -843,24 +843,92 @@
       </div>`; }).join('') : `<div class="empty"><b>${S.d.zonas.length ? 'No hay zonas con este filtro' : 'Todavía no hay zonas'}</b>${S.d.zonas.length ? '' : 'Andá al mapa para crear la primera.'}</div>`}</div>`;
   }
 
-  // ---------- Vista: oportunidades ----------
+  // ---------- Vista: contactos (buscador) ----------
+  const CATS = [['todos', 'Todos'], ['oport', '⭐ Oportunidades'], ['ven', '🚨 Quieren vender'], ['col', CARTEL.replace('class="cartel"', 'class="cartel chip-ic"') + ' En venta con colega'], ['tasar', 'Quieren tasar'], ['tas', '💰 Tasaciones'], ['cap', '🏆 Captaciones'], ['pend', '☎ Llamados pendientes'], ['no', 'No quieren vender'], ['otros', 'Otros']];
+  function enCategoria(v, k, activas) {
+    const ven = v.resultado === 'Interesado en vender' && v.etapa !== 'captacion';
+    const col = !!v.en_venta_colega && v.etapa !== 'captacion';
+    const tasar = v.resultado === 'Interesado en tasar' && !['tasacion', 'captacion'].includes(v.etapa);
+    const tas = v.etapa === 'tasacion', cap = v.etapa === 'captacion', no = v.resultado === 'No quiere vender' && !v.etapa;
+    switch (k) {
+      case 'todos': return true;
+      case 'oport': return ven || col || tas || cap;
+      case 'ven': return ven; case 'col': return col; case 'tasar': return tasar; case 'tas': return tas; case 'cap': return cap; case 'no': return no;
+      case 'pend': return activas.has(v.asignacion_id) && enSeguimiento(v) && proximoContacto(v) <= 0;
+      case 'otros': return !(ven || col || tasar || tas || cap || no);
+    }
+    return true;
+  }
+  const etiquetaCuadra = q => q && q.desde != null ? `${q.desde}–${q.hasta}` : q && q.orden ? `Cuadra ${q.orden}` : 's/d';
   function vistaOportunidades() {
     const el = $('#vista');
-    const f = S.filtroOp || 'colega';
+    const B = S.bus = S.bus || { q: '', calle: '', cuadra: '', zona: '', asesor: '', cat: 'todos', orden: 'reciente', n: 40 };
+    const zonaDeVisita = v => { const a = S.d.asignaciones.find(x => x.id === v.asignacion_id); return a ? S.d.zonas.find(z => z.id === a.zona_id) : null; };
+    const calles = [...new Set(S.d.visitas.map(v => v.calle).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'es'));
+    const cuadrasCalle = B.calle ? [...new Map(S.d.visitas.filter(v => v.calle === B.calle).map(v => { const { q } = zonaYCuadraDe(v); return [v.cuadra_id, q]; })).entries()]
+      .sort((a, b) => ((a[1] && a[1].desde) ?? 1e9) - ((b[1] && b[1].desde) ?? 1e9)) : [];
+    const ases = S.d.perfiles.filter(p => p.rol !== 'admin').sort((a, b) => nombre(a).localeCompare(nombre(b), 'es'));
+    el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>Contactos</h2><button class="btn sm" data-a="csvBusqueda">Exportar CSV</button></div>
+      <div class="buscador card">
+        <input class="i" id="bQ" placeholder="🔎 Buscar por nombre, teléfono, inmobiliaria o nota…" value="${esc(B.q)}" autocomplete="off">
+        <div class="bgrid">
+          <select class="i" data-b="calle"><option value="">Todas las calles</option>${calles.map(c => `<option ${B.calle === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+          <select class="i" data-b="cuadra" ${B.calle ? '' : 'disabled'}><option value="">${B.calle ? 'Todas las cuadras' : 'Cuadra (elegí calle)'}</option>${cuadrasCalle.map(([id, q]) => `<option value="${id}" ${B.cuadra === id ? 'selected' : ''}>${esc(etiquetaCuadra(q))}${q && q.entre && q.entre.filter(Boolean).length === 2 ? ` · e/ ${esc(q.entre[0])} y ${esc(q.entre[1])}` : ''}</option>`).join('')}</select>
+          <select class="i" data-b="zona"><option value="">Todas las zonas</option>${S.d.zonas.map(z => `<option value="${z.id}" ${B.zona === z.id ? 'selected' : ''}>${esc(z.nombre)}</option>`).join('')}</select>
+          <select class="i" data-b="asesor"><option value="">Todos los asesores</option>${ases.map(p => `<option value="${p.id}" ${B.asesor === p.id ? 'selected' : ''}>${esc(nombre(p))}</option>`).join('')}</select>
+          <select class="i" data-b="orden">${[['reciente', 'Más recientes'], ['antiguo', 'Más antiguos'], ['calle', 'Por calle y altura'], ['venta', 'Más tiempo en venta']].map(([k, t]) => `<option value="${k}" ${B.orden === k ? 'selected' : ''}>${t}</option>`).join('')}</select>
+          <button class="btn sm ghost" data-a="limpiarBusqueda">Limpiar filtros</button>
+        </div>
+      </div>
+      <div class="filters" id="bCats"></div>
+      <div id="bRes"></div>`;
+    pintarResultados();
+    $('#bQ').oninput = () => { B.q = $('#bQ').value; B.n = 40; pintarResultados(); };
+  }
+  function filtrarContactos() {
+    const B = S.bus;
+    const activas = new Set(S.d.asignaciones.filter(a => estadoAsig(a) === 'activa').map(a => a.id));
+    const zonaAsig = new Map(S.d.asignaciones.map(a => [a.id, a.zona_id]));
+    const t = Geo.norm(B.q), td = B.q.replace(/\D/g, '');
+    const base = S.d.visitas.filter(v => {
+      if (B.calle && v.calle !== B.calle) return false;
+      if (B.cuadra && v.cuadra_id !== B.cuadra) return false;
+      if (B.zona && zonaAsig.get(v.asignacion_id) !== B.zona) return false;
+      if (B.asesor && v.asesor_id !== B.asesor) return false;
+      if (t) {
+        const txt = Geo.norm([v.propietario, v.venta_inmobiliaria, v.notas, v.calle + ' ' + (v.altura ?? ''), ...notasDe(v).map(n => n.texto)].join(' '));
+        const tel = String(v.telefono || '').replace(/\D/g, '');
+        if (!txt.includes(t) && !(td.length >= 3 && tel.includes(td))) return false;
+      }
+      return true;
+    });
+    const conteo = Object.fromEntries(CATS.map(([k]) => [k, base.filter(v => enCategoria(v, k, activas)).length]));
+    let lista = base.filter(v => enCategoria(v, B.cat, activas));
+    const f = v => (v.creado || v.fecha || '');
+    if (B.orden === 'reciente') lista.sort((a, b) => f(b).localeCompare(f(a)));
+    else if (B.orden === 'antiguo') lista.sort((a, b) => f(a).localeCompare(f(b)));
+    else if (B.orden === 'calle') lista.sort((a, b) => a.calle.localeCompare(b.calle, 'es') || (a.altura || 0) - (b.altura || 0));
+    else if (B.orden === 'venta') lista.sort((a, b) => (a.venta_desde || '9').localeCompare(b.venta_desde || '9') || f(b).localeCompare(f(a)));
+    return { lista, conteo };
+  }
+  function pintarResultados() {
+    const B = S.bus; const { lista, conteo } = filtrarContactos();
+    $('#bCats').innerHTML = CATS.map(([k, t]) => `<button class="${B.cat === k ? 'on' : ''}" data-cat="${k}">${t} (${conteo[k]})</button>`).join('');
     const zonaDe = v => { const a = S.d.asignaciones.find(x => x.id === v.asignacion_id); return { a, z: a ? S.d.zonas.find(z => z.id === a.zona_id) : null }; };
-    const filtroOp = k => v => k === 'colega' ? v.en_venta_colega && v.etapa !== 'captacion' : k === 'vender' ? v.resultado === 'Interesado en vender' && v.etapa !== 'captacion' : k === 'tasar' ? v.resultado === 'Interesado en tasar' && !v.etapa
-      : k === 'tasaciones' ? v.etapa === 'tasacion' : k === 'captaciones' ? v.etapa === 'captacion' : (enSeguimiento(v) && proximoContacto(v) <= 0);
-    let lista = S.d.visitas.filter(filtroOp(f));
-    if (f === 'colega') lista.sort((a, b) => (a.venta_desde || '9').localeCompare(b.venta_desde || '9'));
-    else if (f === 'captaciones') lista.sort((a, b) => (b.captacion_fecha || '').localeCompare(a.captacion_fecha || ''));
-    else lista.sort((a, b) => (b.creado || '').localeCompare(a.creado || ''));
-    const c = k => S.d.visitas.filter(filtroOp(k)).length;
-    el.innerHTML = `<h2>Oportunidades</h2>
-      <p class="muted" style="font-size:14px;margin:6px 0 0">Las casas en venta con colegas aparecen primero las que llevan más tiempo en el mercado.</p>
-      <div class="filters">${[['colega', 'En venta con colegas'], ['vender', 'Quieren vender'], ['tasar', 'Quieren tasar'], ['tasaciones', 'Tasaciones'], ['captaciones', '🏆 Captaciones'], ['atrasados', 'Llamados pendientes']].map(([k, t]) => `<button class="${f === k ? 'on' : ''}" data-fop="${k}">${t} (${c(k)})</button>`).join('')}</div>
-      ${lista.length ? `<div class="zl">${lista.map(v => { const { a, z } = zonaDe(v); return tarjetaVisita(v, { extra: `<div class="muted" style="font-size:12px;margin-top:2px">${z ? `<a href="#" data-zona="${z.id}">${esc(z.nombre)}</a> · ` : ''}${esc(nombre(perfil(v.asesor_id)))}</div>` }); }).join('')}</div>`
-        : '<div class="empty"><b>Nada por acá todavía</b>A medida que los asesores carguen casas, van a aparecer.</div>'}`;
-    cargarFotos(el);
+    const vis = lista.slice(0, B.n);
+    $('#bRes').innerHTML = `<p class="muted" style="font-size:13px;margin:0 0 8px">${lista.length} ${lista.length === 1 ? 'contacto' : 'contactos'}</p>
+      ${vis.length ? `<div class="zl">${vis.map(v => { const { a, z } = zonaDe(v); const { q } = zonaYCuadraDe(v); const fin = a && estadoAsig(a) === 'finalizada';
+        return tarjetaVisita(v, { extra: `<div class="muted" style="font-size:12px;margin-top:4px">${esc(v.calle)} ${esc(etiquetaCuadra(q))} · ${z ? `<a href="#" data-zona="${z.id}">${esc(z.nombre)}</a> · ` : ''}${esc(nombre(perfil(v.asesor_id)))}${fin ? ' · gestión anterior' : ''} · cargado el ${fecha(v.creado || v.fecha)}</div>` }); }).join('')}</div>
+        ${lista.length > vis.length ? `<button class="btn block" style="margin-top:12px" data-a="verMasBusqueda">Ver ${Math.min(40, lista.length - vis.length)} más (quedan ${lista.length - vis.length})</button>` : ''}`
+      : '<div class="empty"><b>No hay contactos con esos filtros</b>Probá cambiar la búsqueda o tocá “Limpiar filtros”.</div>'}`;
+    cargarFotos($('#bRes'));
+  }
+  function csvContactos(lista) {
+    const filas = [['Cargado', 'Calle', 'Altura', 'Cuadra', 'Propietario', 'Teléfono', 'Resultado', 'Etapa', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Notas', 'Seguimiento', 'Zona', 'Asesor']];
+    lista.forEach(v => { const { q, z } = zonaYCuadraDe(v);
+      filas.push([(v.creado || v.fecha || '').slice(0, 10), v.calle, v.altura ?? '', etiquetaCuadra(q), v.propietario, v.telefono, v.resultado, (ETAPAS.find(x => x[0] === etapaDe(v)) || ['', ''])[1], v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', v.notas, notasDe(v).slice().reverse().map(n => `${n.fecha}: ${n.texto}`).join(' | '), z ? z.nombre : '', nombre(perfil(v.asesor_id))]); });
+    const txt = '﻿' + filas.map(f => f.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
+    const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([txt], { type: 'text/csv;charset=utf-8' })); link.download = `contactos-${hoyISO()}.csv`; link.click();
   }
 
   // ---------- Vista: equipo (tablero comparativo) ----------
@@ -1093,7 +1161,7 @@
   async function refrescarSinRecargar() { const y = window.scrollY; renderAsesor(); window.scrollTo(0, y); }
   async function refrescarVista() {
     const zid = S.zonaAbierta, y = $('#sheetBody') ? $('#sheetBody').scrollTop : 0;
-    if (zid) { abrirZona(zid); $('#sheetBody').scrollTop = y; } else if (S.vista === 'oport') { const yy = window.scrollY; vistaOportunidades(); window.scrollTo(0, yy); }
+    if (zid) { abrirZona(zid); $('#sheetBody').scrollTop = y; } else if (S.vista === 'oport') { const yy = window.scrollY; pintarResultados(); window.scrollTo(0, yy); }
   }
   async function refrescarAsesor() {
     await recargar();
@@ -1107,7 +1175,7 @@
     const t = e.target;
     const v = t.closest('[data-v]'); if (v) { if (S.dibujo) terminarDibujo(true); cerrarSheet(); S.vista = v.dataset.v; renderAdmin(); return; }
     const f = t.closest('[data-f]'); if (f) { S.filtro = f.dataset.f; vistaZonas(); return; }
-    const fop = t.closest('[data-fop]'); if (fop) { S.filtroOp = fop.dataset.fop; vistaOportunidades(); return; }
+    const cat = t.closest('[data-cat]'); if (cat) { S.bus.cat = cat.dataset.cat; S.bus.n = 40; pintarResultados(); return; }
     const per = t.closest('[data-per]'); if (per) { S.periodo = per.dataset.per; vistaAsesores(); return; }
     const tab = t.closest('[data-tab]'); if (tab) { S.tabZona = tab.dataset.tab; abrirZona(S.zonaAbierta); return; }
     const as = t.closest('[data-asig]'); if (as) { S.asigSel = as.dataset.asig; S.abiertas.clear(); S.cuadraAbierta = null; renderAsesor(); return; }
@@ -1249,6 +1317,9 @@
         });
         break;
       }
+      case 'csvBusqueda': csvContactos(filtrarContactos().lista); break;
+      case 'verMasBusqueda': S.bus.n += 40; pintarResultados(); break;
+      case 'limpiarBusqueda': S.bus = null; vistaOportunidades(); break;
       case 'editarCasa': { const v = S.d.visitas.find(x => x.id === b.dataset.id); if (v) modalEditar(v); break; }
       case 'guardarEdicion': {
         const form = b.closest('[data-form]'); const v = S.d.visitas.find(x => x.id === b.dataset.id); if (!v) break;
@@ -1328,6 +1399,7 @@
   });
   document.addEventListener('change', e => {
     const t = e.target;
+    if (t.matches('[data-b]') && S.bus) { S.bus[t.dataset.b] = t.value; if (t.dataset.b === 'calle') { S.bus.cuadra = ''; } S.bus.n = 40; if (t.dataset.b === 'calle') vistaOportunidades(); else pintarResultados(); return; }
     if (t.matches('[data-colega]')) {
       const form = t.closest('[data-form]');
       form.querySelector('.colega-campos').classList.toggle('hidden', t.value !== 'si');

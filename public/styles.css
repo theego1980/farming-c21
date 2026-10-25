@@ -325,3 +325,13 @@ ol.pasos{padding-left:20px;line-height:1.7;margin:8px 0 12px}
 .telhint{font-size:12px;margin-top:4px;min-height:0}
 .telhint .ok{color:var(--ok)}
 .telhint .mal{color:var(--warn)}
+
+/* ---------- buscador de contactos ---------- */
+.buscador{margin-top:12px;display:grid;gap:10px}
+.bgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.bgrid .i{font-size:14px;padding:9px 10px}
+.bgrid .btn{align-self:stretch}
+@media (max-width:640px){.bgrid{grid-template-columns:1fr 1fr}}
+#bCats{margin-top:12px}
+
+.cartel.chip-ic{width:15px;height:15px;display:inline-block;vertical-align:-3px}
