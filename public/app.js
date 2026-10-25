@@ -10,7 +10,7 @@
   const CENTRO = [-34.608, -58.48];
 
   const S = { be: null, yo: null, d: null, vista: 'mapa', filtro: 'todas', barrios: [], callejero: null, callejeroP: null,
-    map: null, capas: {}, dibujo: null, zonaAbierta: null, tabZona: 'actividad', asigSel: null, abiertas: new Set(), cuadraAbierta: null, buscar: '' };
+    map: null, capas: {}, dibujo: null, zonaAbierta: null, tabZona: 'actividad', asigSel: null, abiertas: new Set(), cuadraAbierta: null, buscar: '', notasAbiertas: new Set() };
 
   // ---------------- Utilidades ----------------
   const $ = (s, el = document) => el.querySelector(s);
@@ -40,6 +40,14 @@
     else if (d.length === 8) d = '11' + d;                                                              // xxxx xxxx (CABA)
     else if (d.length > 10) { const m = d.match(/^(\d{2,4})15(\d{6,8})$/); if (m && (m[1] + m[2]).length === 10) d = m[1] + m[2]; }
     return d.length === 10 ? '549' + d : null;
+  }
+  // Ayuda debajo del campo teléfono: muestra cómo queda para WhatsApp
+  function telHint(t) {
+    if (!String(t || '').trim()) return '';
+    const n = numeroWA(t);
+    if (!n) return '<span class="mal">⚠ No parece un celular. Escribí característica + número, por ej. 11 6494 9902</span>';
+    const loc = n.slice(3), area = loc.startsWith('11') ? '11' : loc.slice(0, loc.length - 7 > 2 ? loc.length - 7 : 3);
+    return `<span class="ok">✓ WhatsApp: +54 9 ${area} ${loc.slice(area.length, -4)}-${loc.slice(-4)}</span>`;
   }
   function linkWA(v) {
     const n = numeroWA(v.telefono); if (!n) return null;
@@ -73,10 +81,27 @@
     .sort((a, b) => proximoContacto(a) - proximoContacto(b));
   function tituloPestana(n) { document.title = (n ? `(${n}) ` : '') + 'Farming · C21 Inmopul'; }
 
+  const esAdmin = () => !!(S.yo && S.yo.rol === 'admin');
+  // Historial de seguimiento: notas del contacto (y de la gestión anterior si fue retomado)
+  function notasDe(v) {
+    const ids = new Set([v.id]); let p = v.previa_id, g = 0;
+    while (p && g++ < 5) { ids.add(p); const pv = S.d.visitas.find(x => x.id === p); p = pv && pv.previa_id; }
+    return (S.d.notas || []).filter(n => ids.has(n.visita_id)).sort((a, b) => ((b.fecha || '') + (b.creado || '')).localeCompare((a.fecha || '') + (a.creado || '')));
+  }
+  function panelNotas(v, editable) {
+    const lista = notasDe(v);
+    return `<div class="notas">${lista.length ? lista.map(n => `<div class="nota"><span class="nf">${fecha(n.fecha)}</span><div class="nt">${esc(n.texto)}<small>${esc(n.autor_nombre || '')}${n.visita_id !== v.id ? ' · gestión anterior' : ''}${n.pendiente ? ' · por subir' : ''}</small></div>${editable && n.visita_id === v.id && (esAdmin() || n.autor_id === S.yo.id) ? `<button class="x" data-a="delNota" data-id="${n.id}" title="Borrar nota">✕</button>` : ''}</div>`).join('') : '<p class="muted" style="font-size:13px;margin:2px 0 6px">Sin notas todavía.</p>'}
+      ${editable ? `<div class="nota-form"><textarea class="i" rows="2" data-nota="${v.id}" placeholder="Ej: Llamé, dice que vende después de marzo"></textarea>
+        ${v.propietario || v.telefono ? `<label class="chk"><input type="checkbox" data-hable="${v.id}" checked> Hablé con el propietario (reinicia el recordatorio de llamado)</label>` : ''}
+        <button class="btn sm primary" data-a="addNota" data-id="${v.id}">Agregar nota</button></div>` : ''}</div>`;
+  }
+
   // Tarjeta de una casa visitada (la usan el broker y el asesor)
-  function tarjetaVisita(v, { calle, puede, extra = '' } = {}) {
-    const prox = enSeguimiento(v) ? proximoContacto(v) : null;
-    return `<div class="vis">
+  function tarjetaVisita(v, { calle, puede, extra = '', anterior = false, retomable = false } = {}) {
+    const prox = !anterior && enSeguimiento(v) ? proximoContacto(v) : null;
+    const editable = !anterior && (puede || esAdmin());
+    const nn = notasDe(v).length, abierta = S.notasAbiertas.has(v.id);
+    return `<div class="vis ${anterior ? 'anterior' : ''}">${anterior ? '<div class="ant-tag">Gestión anterior · sólo lectura</div>' : ''}
       <div class="h"><b>${esc(calle || v.calle)} ${v.altura ?? 's/n'}</b><span class="muted" style="font-size:12px">${fecha(v.fecha)}</span>${puede ? `<button class="x" data-a="delVisita" data-id="${v.id}" title="Borrar">✕</button>` : ''}</div>
       ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}
       ${v.resultado ? `<div class="r">${esc(v.resultado)}</div>` : ''}
@@ -84,11 +109,14 @@
         ${v.venta_desde ? `<div class="reloj">⏱ Lleva <b>${tiempoVenta(v.venta_desde)}</b> a la venta <span class="muted">(desde ${fechaL(v.venta_desde + 'T12:00:00')})</span></div>` : ''}</div>` : ''}
       ${v.notas ? `<div class="muted" style="font-size:13px">${esc(v.notas)}</div>` : ''}
       ${(v.fotos || []).length ? `<div class="fotos">${v.fotos.map(f => `<img data-foto="${esc(f)}" alt="Foto de la casa">`).join('')}</div>` : ''}
+      ${v.previa_id ? '<div class="muted" style="font-size:11px">↻ Retomado de la gestión anterior</div>' : ''}
       ${etapaDe(v) ? `<div class="etapas">${ETAPAS.map(([k, t], i) => { const idx = ETAPAS.findIndex(x => x[0] === etapaDe(v)); const est = i < idx ? 'hecha' : i === idx ? 'actual' : ''; const f = k === 'tasacion' ? v.tasacion_fecha : k === 'captacion' ? v.captacion_fecha : null;
-          return `<button class="et ${est}" ${puede ? `data-a="etapa" data-id="${v.id}" data-e="${k}"` : 'disabled'}>${i ? '' : ''}${est ? '●' : '○'} ${t}${f ? `<small>${fecha(f)}</small>` : ''}</button>`; }).join('<span class="et-sep">›</span>')}</div>` : ''}
+          return `<button class="et ${est}" ${editable ? `data-a="etapa" data-id="${v.id}" data-e="${k}"` : 'disabled'}>${i ? '' : ''}${est ? '●' : '○'} ${t}${f ? `<small>${fecha(f)}</small>` : ''}</button>`; }).join('<span class="et-sep">›</span>')}</div>` : ''}
       ${prox != null ? `<div class="seg ${prox <= 0 ? 'hoy' : ''}"><span>${prox <= 0 ? '☎ Toca llamar' : `☎ Próximo llamado en ${prox} ${prox === 1 ? 'día' : 'días'}`}${v.ultimo_contacto ? ` · últ. contacto ${fecha(v.ultimo_contacto)}` : ''}</span>
         <span class="row" style="gap:6px">${btnWA(v)}${puede ? `<button class="btn sm" data-a="contactado" data-id="${v.id}">✓ Contactado</button>` : ''}</span></div>` : (v.telefono && linkWA(v) ? `<div class="seg"><span></span>${btnWA(v)}</div>` : '')}
       ${v.etapa === 'captacion' ? `<div class="captada">🏆 Captación firmada${v.captacion_fecha ? ' el ' + fechaL(v.captacion_fecha + 'T12:00:00') : ''}</div>` : ''}
+      <div class="acc-casa">${editable ? `<button class="btn sm ghost" data-a="editarCasa" data-id="${v.id}">✎ Editar</button>` : ''}<button class="btn sm ghost ${abierta ? 'on' : ''}" data-a="verNotas" data-id="${v.id}">🗒 Seguimiento${nn ? ` (${nn})` : ''}</button>${anterior && retomable ? `<button class="btn sm primary" data-a="retomar" data-id="${v.id}">↻ Retomar contacto</button>` : ''}</div>
+      ${abierta ? panelNotas(v, editable) : ''}
       ${extra}</div>`;
   }
 
@@ -330,7 +358,7 @@
     if (S.vista === 'mapa') {
       if (!S.map || !document.getElementById('map')) {
         $('#app').innerHTML = topbar(nav) + `<main><div class="map-wrap"><div id="map"></div>
-          <div class="map-tools" id="mapTools"></div><div class="map-alert" id="mapAlert"></div><div id="drawBar"></div></div></main>`;
+          <div class="map-tools" id="mapTools"></div><div class="map-alert" id="mapAlert"></div><div class="map-leyenda" id="mapLeyenda"></div><div id="drawBar"></div></div></main>`;
         crearMapa();
       } else {
         $('header.top').outerHTML = topbar(nav);
@@ -407,6 +435,10 @@
       pol.addTo(g);
     }
     g.addTo(S.map); S.capas.zonas = g;
+    limpiarCapa('oport');
+    const vigentes = new Set(S.d.asignaciones.filter(a => a.estado !== 'finalizada').map(a => a.id));
+    S.capas.oport = capaOportunidades(S.d.visitas.filter(v => vigentes.has(v.asignacion_id)), S.map, true);
+    const ley = document.getElementById('mapLeyenda'); if (ley) ley.innerHTML = leyendaMarcas();
     if (S.d.zonas.length && !dibujarZonas._fit) {
       dibujarZonas._fit = true;
       const pts = S.d.zonas.flatMap(z => z.geometria.coordinates[0].map(c => [c[1], c[0]]));
@@ -531,12 +563,13 @@
       let cuadras = c.cuadras(ring, dirs);
       if (!S.nueva || S.nueva.ring !== ring) return;
       $('#zCuadras').innerHTML = `<b>${new Set(cuadras.map(q => q.calle)).size} calles · ${cuadras.length} cuadras</b><br><span style="font-size:12px">Buscando la numeración oficial de cada cuadra…</span>`;
-      cuadras = await numeracionOficial(cuadras);
+      cuadras = await numeracionOficial(cuadras, ring);
       if (!S.nueva || S.nueva.ring !== ring) return;
       S.nueva.cuadras = cuadras;
       const calles = new Set(cuadras.map(q => q.calle));
       const conAltura = cuadras.filter(q => q.desde != null).length;
-      $('#zCuadras').innerHTML = `<b>${calles.size} calles · ${cuadras.length} cuadras</b><br><span style="font-size:12px">${conAltura === cuadras.length ? 'Todas con numeración.' : `${conAltura} con numeración. Las demás se ordenan por recorrido y podés fijar la altura después, en la pestaña “Cuadras”.`}</span>${S.motivoNum ? `<div style="font-size:11px;margin-top:6px;opacity:.75">No se pudo consultar la numeración oficial (${esc(S.motivoNum)}).</div>` : ''}`;
+      const conMano = cuadras.filter(q => q.mano).length;
+      $('#zCuadras').innerHTML = `<b>${calles.size} calles · ${cuadras.length} cuadras</b><br><span style="font-size:12px">${conAltura === cuadras.length ? 'Todas con numeración.' : `${conAltura} con numeración. Las demás se ordenan por recorrido y podés fijar la altura después, en la pestaña “Cuadras”.`}${conMano ? ` ${conMano} cuadras del límite quedan con su mano (par o impar).` : ''}</span>${S.motivoNum ? `<div style="font-size:11px;margin-top:6px;opacity:.75">No se pudo consultar la numeración oficial (${esc(S.motivoNum)}).</div>` : ''}`;
       mostrarCuadras(cuadras, []);
       $('#btnGuardarZona').disabled = false;
     } catch (e) {
@@ -559,8 +592,7 @@
     if (fallos === puntos.length) throw new Error('el navegador no pudo conectarse');
     return out;
   }
-  async function numeracionOficial(cuadras) {
-    const puntos = cuadras.map(q => Geo.midpoint(q.coords));
+  async function consultarAlturas(puntos) {
     let res = null, motivo = '';
     try {
       const r = await S.be.alturasOficiales(puntos);
@@ -569,10 +601,26 @@
     if (S.be.modo === 'supabase' && (!res || !res.some(Boolean))) {
       try { res = await usigDirecto(puntos); } catch (e) { motivo += (motivo ? ' · ' : '') + 'navegador: ' + e.message; }
     }
-    if (!res || !res.some(Boolean)) { S.motivoNum = motivo || 'el servicio de la Ciudad no devolvió alturas'; return cuadras; }
-    S.motivoNum = '';
-    return Geo.aplicarAlturasOficiales(cuadras, res).cuadras;
+    return { res: res && res.some(Boolean) ? res : null, motivo };
   }
+  async function numeracionOficial(cuadras, ring) {
+    const { res, motivo } = await consultarAlturas(cuadras.map(q => Geo.midpoint(q.coords)));
+    if (!res) { S.motivoNum = motivo || 'el servicio de la Ciudad no devolvió alturas'; return cuadras; }
+    S.motivoNum = '';
+    const out = Geo.aplicarAlturasOficiales(cuadras, res).cuadras;
+    if (ring) await asignarManos(out, ring);
+    return out;
+  }
+  // Calles del límite: cada zona trabaja sólo la vereda que da hacia adentro (par o impar)
+  async function asignarManos(cuadras, ring) {
+    const per = cuadras.map(q => ({ q, p: q.perimetral ? Geo.puntoInterior(q.coords, ring) : null })).filter(x => x.p);
+    cuadras.forEach(q => { delete q.mano; });
+    if (!per.length) return;
+    const { res } = await consultarAlturas(per.map(x => x.p));
+    if (!res) return;
+    per.forEach((x, i) => { const r = res[i]; if (r && r.altura && Geo.mismaCalle(x.q.calle, r.calle)) x.q.mano = r.altura % 2 === 0 ? 'par' : 'impar'; });
+  }
+  const anilloZona = z => z.geometria.coordinates[0].map(c => [c[1], c[0]]);
 
   async function guardarZona(btn) {
     const N = S.nueva; if (!N || !N.cuadras) return;
@@ -609,6 +657,37 @@
     if (map === S.map) S.capas[key] = g;
     return g;
   }
+  // Marcas de oportunidades: 🚨 quiere vender · 💰 tasación · 🏆 captación · 🪧 en venta con colega
+  // Cartel de venta dibujado (el emoji 🪧 es blanco y no se puede pintar)
+  const CARTEL = '<svg class="cartel" viewBox="0 0 24 24" aria-hidden="true"><rect x="11" y="13" width="2.4" height="10" rx="1" fill="#5a3b1e"/><rect x="2" y="2.5" width="20" height="12" rx="2" fill="#E8590C" stroke="#7a2e06" stroke-width="1.2"/><text x="12" y="11.3" text-anchor="middle" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="6.6" fill="#FFE8A3">VENTA</text></svg>';
+  const MARCAS = { cap: ['🏆', '#BEAF87', 'Captación'], tas: ['💰', '#E9B44C', 'Tasación hecha'], col: [CARTEL, '#5B8DEF', 'En venta con colega'], ven: ['🚨', '#E0524A', 'Quiere vender'] };
+  const tipoOport = v => v.etapa === 'captacion' ? 'cap' : v.etapa === 'tasacion' ? 'tas' : v.en_venta_colega ? 'col' : v.resultado === 'Interesado en vender' ? 'ven' : null;
+  const leyendaMarcas = () => `<div class="leyenda">${Object.values(MARCAS).reverse().map(([e, c, t]) => `<span><i style="--c:${c}">${e}</i>${t}</span>`).join('')}</div>`;
+  function capaOportunidades(visitas, map, conAsesor) {
+    const cuadraDe = new Map();
+    for (const a of S.d.asignaciones) { const z = S.d.zonas.find(x => x.id === a.zona_id); if (z) (z.cuadras || []).forEach(q => cuadraDe.set(a.id + '|' + q.id, { q, z })); }
+    const grupos = new Map();
+    for (const v of visitas) { if (!tipoOport(v)) continue; const k = v.asignacion_id + '|' + v.cuadra_id; if (!cuadraDe.has(k)) continue; if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(v); }
+    const g = L.layerGroup();
+    for (const [k, vs] of grupos) {
+      const { q, z } = cuadraDe.get(k);
+      vs.sort((a, b) => (a.altura || 0) - (b.altura || 0));
+      vs.forEach((v, i) => {
+        const [emoji, color, txt] = MARCAS[tipoOport(v)];
+        const p = Geo.puntoEnCuadra(q.coords, (i + 1) / (vs.length + 1));
+        const html = `<div class="pop"><div class="pop-t" style="color:${color}">${emoji} ${txt}</div><b>${esc(v.calle)} ${v.altura ?? ''}</b>
+          ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}
+          ${v.en_venta_colega ? `<div class="muted">Con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ' · lleva ' + tiempoVenta(v.venta_desde) : ''}</div>` : ''}
+          ${conAsesor ? `<div class="muted">${esc(z.nombre)} · ${esc(nombre(perfil(v.asesor_id)))}</div>` : ''}
+          ${btnWA(v) ? `<div style="margin-top:6px">${btnWA(v)}</div>` : ''}</div>`;
+        L.marker(p, { icon: L.divIcon({ className: 'pin-op', html: `<div class="pin" style="--c:${color}"><span>${emoji}</span></div>`, iconSize: [34, 40], iconAnchor: [17, 38], popupAnchor: [0, -34] }), zIndexOffset: tipoOport(v) === 'cap' ? 300 : 0 })
+          .bindPopup(html, { maxWidth: 260 }).addTo(g);
+      });
+    }
+    g.addTo(map);
+    return g;
+  }
+
   const tituloCuadra = q => q.desde != null ? `${q.calle} ${q.desde}–${q.hasta}${q.aprox ? ' (aprox.)' : ''}` : `${q.calle} · cuadra ${q.orden}`;
   const entreTxt = q => { const e = (q.entre || []).filter(Boolean); return e.length === 2 ? `entre ${e[0]} y ${e[1]}` : e.length ? `desde ${e[0]}` : ''; };
 
@@ -672,11 +751,13 @@
     } else if (S.tabZona === 'cuadras') {
       const porCalle = agrupar(z.cuadras || []);
       const sinNum = (z.cuadras || []).filter(q => q.desde == null).length;
-      el.innerHTML = `${S.be.modo === 'supabase' ? `<button class="btn sm ${sinNum ? 'primary' : ''} block" style="margin-bottom:12px" data-a="numOficial">↻ Buscar numeración oficial${sinNum ? ` (${sinNum} cuadras sin altura)` : ''}</button>` : ''}
+      el.innerHTML = `${S.be.modo === 'supabase' ? `<button class="btn sm ${sinNum ? 'primary' : ''} block" style="margin-bottom:12px" data-a="numOficial">↻ Actualizar numeración y manos${sinNum ? ` (${sinNum} cuadras sin altura)` : ''}</button>` : ''}
         <p class="muted" style="font-size:13px;line-height:1.5;margin:0 0 12px">Si la numeración de una calle no es correcta, escribí la altura de su <b>primera cuadra</b> y tocá Aplicar. Con ⇅ invertís el sentido.</p>
         ${porCalle.map(([calle, qs]) => `<details class="calle"><summary>${esc(calle)}${qs.some(q => q.perimetral) ? '<span class="perim">LÍMITE</span>' : ''}<span class="cnt">${qs.length}</span></summary>
           <div style="padding:0 14px 12px"><div class="calib"><input class="i" type="number" step="100" placeholder="Ej: 3200" value="${qs[0].desde ?? ''}" data-calib="${esc(calle)}"><button class="btn sm" data-a="calibrar" data-calle="${esc(calle)}">Aplicar</button><button class="btn sm ghost" data-a="invertir" data-calle="${esc(calle)}" title="Invertir sentido">⇅</button></div>
-          <table class="t">${qs.map(q => `<tr><td><b>${q.desde != null ? `${q.desde}–${q.hasta}` : `Cuadra ${q.orden}`}</b>${q.aprox ? ' <span class="muted">aprox.</span>' : ''}</td><td class="muted">${esc(entreTxt(q))}</td></tr>`).join('')}</table></div></details>`).join('')}`;
+          <table class="t">${qs.map(q => `<tr><td><b>${q.desde != null ? `${q.desde}–${q.hasta}` : `Cuadra ${q.orden}`}</b>${q.aprox ? ' <span class="muted">aprox.</span>' : ''}</td><td class="muted">${esc(entreTxt(q))}</td>
+            <td style="text-align:right">${q.perimetral ? `<button class="mano-btn ${q.mano ? 'on' : ''}" data-a="mano" data-q="${q.id}" title="Tocá para cambiar">${q.mano ? 'mano ' + q.mano : 'ambas manos'}</button>` : ''}</td></tr>`).join('')}</table></div></details>`).join('')}
+        <p class="muted" style="font-size:12px;margin-top:10px">En las calles del límite, cada zona trabaja sólo la vereda que le corresponde. Si alguna está mal, tocá la etiqueta para cambiarla (par → impar → ambas).</p>`;
     } else {
       const hist = S.d.asignaciones.filter(x => x.zona_id === z.id).sort((x, y) => y.inicio.localeCompare(x.inicio));
       el.innerHTML = hist.length ? hist.map(h => { const st = stats([h.id]); const e = estadoAsig(h); return `<div class="card" style="padding:12px 14px;margin-bottom:8px">
@@ -734,9 +815,9 @@
   function csv(z, a) {
     const st = stats([a.id]);
     const qmap = new Map((z.cuadras || []).map(q => [q.id, q]));
-    const filas = [['Fecha', 'Calle', 'Altura', 'Propietario', 'Teléfono', 'Resultado', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Etapa', 'Fecha tasación', 'Fecha captación', 'Notas', 'Cuadra', 'Asesor']];
+    const filas = [['Fecha', 'Calle', 'Altura', 'Propietario', 'Teléfono', 'Resultado', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Etapa', 'Fecha tasación', 'Fecha captación', 'Notas', 'Seguimiento', 'Cuadra', 'Asesor']];
     const as = nombre(perfil(a.asesor_id));
-    st.v.forEach(v => { const q = qmap.get(v.cuadra_id); filas.push([v.fecha, v.calle, v.altura ?? '', v.propietario, v.telefono, v.resultado, v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', (ETAPAS.find(x => x[0] === etapaDe(v)) || ['', ''])[1], v.tasacion_fecha || '', v.captacion_fecha || '', v.notas, q ? entreTxt(q) : '', as]); });
+    st.v.forEach(v => { const q = qmap.get(v.cuadra_id); filas.push([v.fecha, v.calle, v.altura ?? '', v.propietario, v.telefono, v.resultado, v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', (ETAPAS.find(x => x[0] === etapaDe(v)) || ['', ''])[1], v.tasacion_fecha || '', v.captacion_fecha || '', v.notas, notasDe(v).slice().reverse().map(n => `${n.fecha}: ${n.texto}`).join(' | '), q ? entreTxt(q) : '', as]); });
     const txt = '﻿' + filas.map(f => f.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const blob = new Blob([txt], { type: 'text/csv;charset=utf-8' });
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = `farming-${z.nombre.replace(/[^\w]+/g, '-')}.csv`; link.click();
@@ -888,7 +969,7 @@
       </div>
 
       <div class="card"><div class="row" style="justify-content:space-between"><h3 style="font-size:16px">Mapa de la zona</h3><span class="muted" style="font-size:12px">Dorado = trabajadas · Gris = pendientes</span></div>
-        <div class="mini-map" id="miniMap"></div></div>
+        <div class="mini-map" id="miniMap"></div>${leyendaMarcas()}</div>
 
       <div style="margin-top:20px"><div class="row" style="justify-content:space-between;margin-bottom:10px"><h3 style="font-size:18px">Calles y cuadras</h3><span class="muted" style="font-size:13px">${(z.cuadras || []).length} cuadras</span></div>
         <div class="row" style="flex-wrap:nowrap;margin-bottom:12px"><input class="i" id="buscar" placeholder="Buscar calle…" value="${esc(S.buscar)}" style="flex:1">
@@ -910,6 +991,7 @@
     const pol = L.polygon(ring, { color: z.color, weight: 2, fillOpacity: .12 }).addTo(m);
     m.fitBounds(pol.getBounds(), { padding: [10, 10] });
     mostrarCuadras(z.cuadras || [], stats([a.id]).v, m, 'mini');
+    capaOportunidades(stats([a.id]).v, m, false);
     S.mini = m;
     setTimeout(() => m.invalidateSize(), 50);
   }
@@ -919,24 +1001,29 @@
     const puede = estadoAsig(a) === 'activa';
     const st = stats([a.id]);
     const porCuadra = new Map(); st.v.forEach(v => { if (!porCuadra.has(v.cuadra_id)) porCuadra.set(v.cuadra_id, []); porCuadra.get(v.cuadra_id).push(v); });
+    const idsZona = new Set((z.cuadras || []).map(x => x.id));
+    const retomadas = new Set(st.v.map(x => x.previa_id).filter(Boolean));
+    const antPorCuadra = new Map();
+    S.d.visitas.filter(x => x.asignacion_id !== a.id && idsZona.has(x.cuadra_id) && !retomadas.has(x.id)).forEach(x => { if (!antPorCuadra.has(x.cuadra_id)) antPorCuadra.set(x.cuadra_id, []); antPorCuadra.get(x.cuadra_id).push(x); });
     const q = Geo.norm(S.buscar);
     const grupos = agrupar((z.cuadras || []).filter(x => !S.soloPend || !porCuadra.has(x.id))).filter(([c]) => !q || Geo.norm(c).includes(q));
     el.innerHTML = grupos.length ? grupos.map(([calle, qs]) => {
       const n = qs.reduce((s, x) => s + (porCuadra.get(x.id)?.length || 0), 0);
       return `<details class="calle" data-calle="${esc(calle)}" ${S.abiertas.has(calle) ? 'open' : ''}><summary>${esc(calle)}${qs.some(x => x.perimetral) ? '<span class="perim">LÍMITE</span>' : ''}<span class="cnt ${n ? 'on' : ''}">${n}</span></summary>
         ${qs.map(cq => { const vs = (porCuadra.get(cq.id) || []).slice().sort((x, y) => (x.altura || 0) - (y.altura || 0)); return `<div class="cuadra ${S.cuadraAbierta === cq.id ? 'open' : ''}" id="c_${cq.id}">
-          <div class="cuadra-h" data-cuadra="${cq.id}"><div class="tt"><b>${cq.desde != null ? `${cq.desde} – ${cq.hasta}` : `Cuadra ${cq.orden}`}${cq.aprox ? ' <small>aprox.</small>' : ''}</b><small>${esc(entreTxt(cq))}</small></div><span class="cnt ${vs.length ? 'on' : ''}">${vs.length}</span></div>
+          <div class="cuadra-h" data-cuadra="${cq.id}"><div class="tt"><b>${cq.desde != null ? `${cq.desde} – ${cq.hasta}` : `Cuadra ${cq.orden}`}${cq.aprox ? ' <small>aprox.</small>' : ''}${cq.mano ? ` <span class="mano">sólo mano ${cq.mano}</span>` : ''}</b><small>${esc(entreTxt(cq))}${(antPorCuadra.get(cq.id) || []).length ? ` · ${antPorCuadra.get(cq.id).length} de la gestión anterior` : ''}</small></div><span class="cnt ${vs.length ? 'on' : ''}">${vs.length}</span></div>
           <div class="cuadra-b">${vs.map(v => tarjetaVisita(v, { calle: cq.calle, puede })).join('')}
-            ${puede ? `<div class="vform" data-form="${cq.id}"><div class="grid2"><div><label class="f" style="margin-top:0">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" placeholder="${cq.desde != null ? cq.desde + '…' + cq.hasta : 'Número'}"></div>
+            ${(antPorCuadra.get(cq.id) || []).length ? `<div class="ant-h">De la gestión anterior (${antPorCuadra.get(cq.id).length})</div>${antPorCuadra.get(cq.id).map(v => tarjetaVisita(v, { calle: cq.calle, anterior: true, retomable: puede })).join('')}` : ''}
+            ${puede ? `<div class="vform" data-form="${cq.id}"><div class="grid2"><div><label class="f" style="margin-top:0">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" placeholder="${cq.desde != null ? cq.desde + '…' + cq.hasta : 'Número'}${cq.mano ? ' (' + cq.mano + ')' : ''}"></div>
               <div><label class="f" style="margin-top:0">Resultado</label><select class="i" name="resultado"><option value="">—</option>${RESULTADOS.map(r => `<option>${r}</option>`).join('')}</select></div></div>
               <label class="f">Propietario</label><input class="i" name="propietario" placeholder="Nombre y apellido" autocomplete="off">
-              <label class="f">Teléfono</label><input class="i" name="telefono" type="tel" inputmode="tel" autocomplete="off">
+              <label class="f">Teléfono celular</label><input class="i" name="telefono" type="tel" inputmode="tel" placeholder="Ej: 11 6494 9902 · característica + número, sin 0 ni 15" autocomplete="off"><div class="telhint" data-telhint></div>
               <label class="f">¿En venta con colega?</label>
               <div class="sino"><label><input type="radio" name="colega_${cq.id}" value="no" data-colega checked><span>No</span></label><label><input type="radio" name="colega_${cq.id}" value="si" data-colega><span>Sí</span></label></div>
               <div class="colega-campos hidden">
                 <label class="f">¿Hace cuánto está a la venta?</label>
                 <div class="row" style="flex-wrap:nowrap"><input class="i" name="venta_cant" type="number" min="0" inputmode="numeric" placeholder="Ej: 4" style="flex:1"><select class="i" name="venta_unidad" style="flex:1"><option value="30.44">meses</option><option value="1">días</option><option value="365.25">años</option></select></div>
-                <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" placeholder="Ej: Remax Devoto" autocomplete="off">
+                <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" placeholder="Escribí el nombre de la firma colega" autocomplete="off">
                 <label class="f">Valor publicado (USD)</label><input class="i" name="venta_valor" type="number" min="0" inputmode="numeric" placeholder="Ej: 185000">
               </div>
               <label class="f">Notas</label><input class="i" name="notas" placeholder="Ej: PH al fondo, vende en 2027" autocomplete="off">
@@ -959,6 +1046,53 @@
     const el = document.getElementById('c_' + qid); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
+  // ---------- Editar una casa ----------
+  function zonaYCuadraDe(v) {
+    for (const z of S.d.zonas) { const q = (z.cuadras || []).find(x => x.id === v.cuadra_id); if (q) return { z, q }; }
+    return { z: null, q: { calle: v.calle } };
+  }
+  function modalEditar(v) {
+    const { q } = zonaYCuadraDe(v);
+    const meses = v.venta_desde ? Math.max(0, Math.round(diasDesde(v.venta_desde) / 30.44)) : '';
+    const opt = (val, txt) => `<option value="${esc(val)}" ${v.resultado === val ? 'selected' : ''}>${esc(txt)}</option>`;
+    modal(`<h3>Editar casa</h3><p class="muted" style="margin:0 0 4px;font-size:13px">${esc(v.calle)} ${v.altura ?? ''}${q.mano ? ` · tu zona trabaja la mano ${q.mano}` : ''}</p>
+      <div class="vform" data-form="edit" data-id="${v.id}" data-meses="${meses}" style="border:0;padding:0;margin-top:6px">
+        <div class="grid2"><div><label class="f">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" value="${v.altura ?? ''}"></div>
+          <div><label class="f">Resultado</label><select class="i" name="resultado">${opt('', '—')}${RESULTADOS.map(r => opt(r, r)).join('')}${v.resultado && !RESULTADOS.includes(v.resultado) ? opt(v.resultado, v.resultado) : ''}</select></div></div>
+        <label class="f">Propietario</label><input class="i" name="propietario" value="${esc(v.propietario || '')}" autocomplete="off">
+        <label class="f">Teléfono celular</label><input class="i" name="telefono" type="tel" inputmode="tel" value="${esc(v.telefono || '')}" placeholder="Ej: 11 6494 9902 · característica + número, sin 0 ni 15" autocomplete="off"><div class="telhint" data-telhint>${telHint(v.telefono)}</div>
+        <label class="f">¿En venta con colega?</label>
+        <div class="sino"><label><input type="radio" name="colega_edit" value="no" data-colega ${v.en_venta_colega ? '' : 'checked'}><span>No</span></label><label><input type="radio" name="colega_edit" value="si" data-colega ${v.en_venta_colega ? 'checked' : ''}><span>Sí</span></label></div>
+        <div class="colega-campos ${v.en_venta_colega ? '' : 'hidden'}">
+          <label class="f">¿Hace cuánto está a la venta?</label>
+          <div class="row" style="flex-wrap:nowrap"><input class="i" name="venta_cant" type="number" min="0" inputmode="numeric" value="${meses}" style="flex:1"><select class="i" name="venta_unidad" style="flex:1"><option value="30.44">meses</option><option value="1">días</option><option value="365.25">años</option></select></div>
+          <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" value="${esc(v.venta_inmobiliaria || '')}" placeholder="Escribí el nombre de la firma colega" autocomplete="off">
+          <label class="f">Valor publicado (USD)</label><input class="i" name="venta_valor" type="number" min="0" inputmode="numeric" value="${v.venta_valor ?? ''}">
+        </div>
+        <label class="f">Notas</label><input class="i" name="notas" value="${esc(v.notas || '')}" autocomplete="off">
+        <label class="f">Fotos (hasta 3)</label>
+        <div class="fotos" data-exist>${(v.fotos || []).map(f => `<span class="pv"><img data-foto="${esc(f)}" alt=""><button type="button" data-quitarexist="${esc(f)}">✕</button></span>`).join('')}</div>
+        <label class="btn sm fotobtn" style="margin-top:6px">📷 Agregar fotos<input type="file" accept="image/*" multiple data-fotos hidden></label>
+        <div class="fotos prev" data-prev></div>
+        <p class="muted" style="font-size:12px;margin:10px 0 0">Para registrar novedades con fecha (llamados, cambios de precio), usá <b>🗒 Seguimiento</b>.</p>
+        <div class="row" style="margin-top:14px;justify-content:flex-end"><button class="btn ghost" data-a="cerrarModal">Cancelar</button><button class="btn primary" data-a="guardarEdicion" data-id="${v.id}">Guardar cambios</button></div>
+      </div>`);
+    const form = $('#modalCard [data-form="edit"]'); form._exist = [...(v.fotos || [])]; form._fotos = [];
+    cargarFotos($('#modalCard'));
+  }
+  async function refrescar() {
+    if (!esAdmin()) return refrescarAsesor();
+    await recargar();
+    const zid = S.zonaAbierta, y = $('#sheetBody') ? $('#sheetBody').scrollTop : 0;
+    if (S.vista === 'mapa') { dibujarZonas(); herramientasMapa(); } else renderAdmin();
+    if (zid) { abrirZona(zid); $('#sheetBody').scrollTop = y; }
+  }
+
+  async function refrescarSinRecargar() { const y = window.scrollY; renderAsesor(); window.scrollTo(0, y); }
+  async function refrescarVista() {
+    const zid = S.zonaAbierta, y = $('#sheetBody') ? $('#sheetBody').scrollTop : 0;
+    if (zid) { abrirZona(zid); $('#sheetBody').scrollTop = y; } else if (S.vista === 'oport') { const yy = window.scrollY; vistaOportunidades(); window.scrollTo(0, yy); }
+  }
   async function refrescarAsesor() {
     await recargar();
     const y = window.scrollY; renderAsesor(); window.scrollTo(0, y);
@@ -1041,11 +1175,18 @@
       case 'numOficial': {
         const z = zona();
         await conCarga(b, async () => {
-          const cuadras = await numeracionOficial(JSON.parse(JSON.stringify(z.cuadras)));
-          const n = cuadras.filter(q => q.desde != null).length;
+          const cuadras = await numeracionOficial(JSON.parse(JSON.stringify(z.cuadras)), anilloZona(z));
+          const n = cuadras.filter(q => q.desde != null).length, nm = cuadras.filter(q => q.mano).length;
           await S.be.guardarZona({ ...z, cuadras }); await recargar(); abrirZona(z.id);
-          toast(S.motivoNum ? `No se pudo consultar la numeración oficial (${S.motivoNum})` : `${n} de ${cuadras.length} cuadras con numeración`, !!S.motivoNum);
+          toast(S.motivoNum ? `No se pudo consultar la numeración oficial (${S.motivoNum})` : `${n} de ${cuadras.length} cuadras con numeración · ${nm} del límite con mano asignada`, !!S.motivoNum);
         });
+        break;
+      }
+      case 'mano': {
+        const z = zona(); const cuadras = JSON.parse(JSON.stringify(z.cuadras)); const q = cuadras.find(x => x.id === b.dataset.q);
+        q.mano = q.mano === 'par' ? 'impar' : q.mano === 'impar' ? undefined : 'par';
+        if (!q.mano) delete q.mano;
+        await conCarga(null, async () => { await S.be.guardarZona({ ...z, cuadras }); await recargar(); abrirZona(z.id); });
         break;
       }
       case 'calibrar': case 'invertir': {
@@ -1083,6 +1224,9 @@
         const val = n => form.querySelector(`[name=${n}]`).value.trim();
         const altura = val('altura') ? parseInt(val('altura'), 10) : null;
         if (!altura && !val('propietario') && !val('telefono')) return toast('Cargá al menos la altura de la casa', true);
+        if (altura && q.mano && (altura % 2 === 0 ? 'par' : 'impar') !== q.mano) {
+          if (!await confirmar('Vereda de la zona vecina', `En ${esc(q.calle)} tu zona trabaja sólo la <b>mano ${q.mano}</b>. El ${altura} está en la vereda de enfrente, que corresponde a la zona vecina. ¿Querés cargarla igual?`, 'Cargar igual')) return;
+        }
         const colega = form.querySelector('[data-colega]:checked')?.value === 'si';
         let venta = { en_venta_colega: false, venta_desde: null, venta_inmobiliaria: '', venta_valor: null };
         if (colega) {
@@ -1103,6 +1247,60 @@
         });
         break;
       }
+      case 'editarCasa': { const v = S.d.visitas.find(x => x.id === b.dataset.id); if (v) modalEditar(v); break; }
+      case 'guardarEdicion': {
+        const form = b.closest('[data-form]'); const v = S.d.visitas.find(x => x.id === b.dataset.id); if (!v) break;
+        const { q } = zonaYCuadraDe(v);
+        const val = n => form.querySelector(`[name=${n}]`).value.trim();
+        const altura = val('altura') ? parseInt(val('altura'), 10) : null;
+        if (!altura && !val('propietario') && !val('telefono')) return toast('Dejá al menos la altura de la casa', true);
+        if (!esAdmin() && altura && q.mano && altura !== v.altura && (altura % 2 === 0 ? 'par' : 'impar') !== q.mano) {
+          if (!await confirmar('Vereda de la zona vecina', `En ${esc(q.calle)} tu zona trabaja sólo la <b>mano ${q.mano}</b>. ¿Guardar igual el ${altura}?`, 'Guardar igual')) { modalEditar(v); return; }
+        }
+        const colega = form.querySelector('[data-colega]:checked')?.value === 'si';
+        let venta = { en_venta_colega: false, venta_desde: null, venta_inmobiliaria: '', venta_valor: null };
+        if (colega) {
+          if (!val('venta_inmobiliaria')) return toast('Indicá qué inmobiliaria la tiene a la venta', true);
+          if (val('venta_cant') === '' || !(Number(val('venta_cant')) >= 0)) return toast('Indicá hace cuánto está a la venta', true);
+          let desde = v.venta_desde;
+          const sinCambio = v.venta_desde && val('venta_cant') === String(form.dataset.meses) && val('venta_unidad') === '30.44';
+          if (!sinCambio) { const d = new Date(Date.now() - Math.round(Number(val('venta_cant')) * Number(val('venta_unidad'))) * DIA); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); desde = d.toISOString().slice(0, 10); }
+          venta = { en_venta_colega: true, venta_desde: desde, venta_inmobiliaria: val('venta_inmobiliaria'), venta_valor: val('venta_valor') ? Number(val('venta_valor')) : null };
+        }
+        const exist = form._exist || [], nuevas = (form._fotos || []).slice(0, Math.max(0, 3 - exist.length));
+        const quitadas = (v.fotos || []).filter(f => !exist.includes(f));
+        await conCarga(b, async () => {
+          const fotos = [...exist];
+          for (const f of nuevas) fotos.push(await S.be.subirFoto(await comprimir(f)));
+          await S.be.editar('visitas', v.id, { altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), ...venta, fotos });
+          if (quitadas.length) S.be.borrarFotos(quitadas);
+          cerrarModal(); toast('Cambios guardados'); await refrescar();
+        });
+        break;
+      }
+      case 'verNotas': { const id = b.dataset.id; S.notasAbiertas.has(id) ? S.notasAbiertas.delete(id) : S.notasAbiertas.add(id); await (esAdmin() ? refrescarVista() : refrescarSinRecargar()); break; }
+      case 'addNota': {
+        const id = b.dataset.id; const ta = document.querySelector(`[data-nota="${id}"]`); const texto = (ta?.value || '').trim();
+        if (!texto) return toast('Escribí la nota', true);
+        const hable = document.querySelector(`[data-hable="${id}"]`)?.checked;
+        await conCarga(b, async () => {
+          await S.be.agregar('notas', { visita_id: id, texto, fecha: hoyISO(), autor_nombre: nombre(S.yo) });
+          if (hable) await S.be.editar('visitas', id, { ultimo_contacto: hoyISO() });
+          S.notasAbiertas.add(id); toast('Nota agregada'); await refrescar();
+        });
+        break;
+      }
+      case 'delNota': if (await confirmar('Borrar nota', '¿Seguro que querés borrar esta nota?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('notas', b.dataset.id); await refrescar(); }); } break;
+      case 'retomar': {
+        const v = S.d.visitas.find(x => x.id === b.dataset.id); if (!v) break;
+        if (!await confirmar('Retomar contacto', `${esc(v.propietario || 'Este contacto')} (${esc(v.calle)} ${v.altura ?? ''}) pasa a tu lista para que le hagas seguimiento. Su historial de notas queda a la vista.`, 'Retomar')) break;
+        await conCarga(null, async () => {
+          await S.be.agregar('visitas', { asignacion_id: S.asigSel, cuadra_id: v.cuadra_id, calle: v.calle, altura: v.altura, propietario: v.propietario || '', telefono: v.telefono || '', resultado: v.resultado || '', notas: v.notas || '', fecha: hoyISO(),
+            en_venta_colega: !!v.en_venta_colega, venta_desde: v.venta_desde || null, venta_inmobiliaria: v.venta_inmobiliaria || '', venta_valor: v.venta_valor ?? null, fotos: [], previa_id: v.id });
+          toast('Contacto retomado'); await refrescarAsesor();
+        });
+        break;
+      }
       case 'contactado': await conCarga(b, async () => { await S.be.editar('visitas', b.dataset.id, { ultimo_contacto: hoyISO() }); toast(`Listo. Te recordamos de nuevo en ${SEGUIR_CADA} días`); await refrescarAsesor(); }); break;
       case 'togglePend': S.verPend = !S.verPend; renderAsesor(); break;
       case 'soloPend': { S.soloPend = !S.soloPend; const a2 = S.d.asignaciones.find(x => x.id === S.asigSel); const z2 = S.d.zonas.find(x => x.id === a2.zona_id); b.classList.toggle('primary', S.soloPend); b.textContent = (S.soloPend ? '✓ ' : '') + 'Pendientes'; renderCalles(z2, a2); break; }
@@ -1116,13 +1314,16 @@
         if (et === 'captacion') cambio.captacion_fecha = hoyISO();
         if (et === 'contacto') { cambio.captacion_fecha = null; cambio.tasacion_fecha = null; }
         if (et === 'tasacion') cambio.captacion_fecha = null;
-        await conCarga(null, async () => { await S.be.editar('visitas', id, cambio); toast(et === 'captacion' ? '🏆 ¡Captación registrada!' : 'Etapa actualizada'); if (S.yo.rol === 'admin') { await recargar(); renderAdmin(); if (S.zonaAbierta) abrirZona(S.zonaAbierta); } else await refrescarAsesor(); });
+        await conCarga(null, async () => { await S.be.editar('visitas', id, cambio); toast(et === 'captacion' ? '🏆 ¡Captación registrada!' : 'Etapa actualizada'); await refrescar(); });
         break;
       }
       case 'delVisita': if (await confirmar('Borrar casa', '¿Seguro que querés borrar este registro?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('visitas', b.dataset.id); await refrescarAsesor(); }); } break;
     }
   });
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
+  document.addEventListener('input', e => {
+    if (e.target.matches('[data-form] [name=telefono]')) { const h = e.target.parentElement.querySelector('[data-telhint]'); if (h) h.innerHTML = telHint(e.target.value); }
+  });
   document.addEventListener('change', e => {
     const t = e.target;
     if (t.matches('[data-colega]')) {
@@ -1133,7 +1334,8 @@
       const form = t.closest('[data-form]');
       const nuevas = [...t.files].filter(f => f.type.startsWith('image/'));
       form._fotos = [...(form._fotos || []), ...nuevas];
-      if (form._fotos.length > 3) { toast('Máximo 3 fotos por casa', true); form._fotos = form._fotos.slice(0, 3); }
+      const lugar = 3 - (form._exist ? form._exist.length : 0);
+      if (form._fotos.length > lugar) { toast('Máximo 3 fotos por casa', true); form._fotos = form._fotos.slice(0, Math.max(0, lugar)); }
       t.value = '';
       pintarPrevias(form);
     }
@@ -1145,8 +1347,10 @@
   document.addEventListener('click', e => {
     const q = e.target.closest('[data-quitar]');
     if (q) { const form = q.closest('[data-form]'); form._fotos.splice(Number(q.dataset.quitar), 1); pintarPrevias(form); return; }
+    const qe = e.target.closest('[data-quitarexist]');
+    if (qe) { const form = qe.closest('[data-form]'); form._exist = form._exist.filter(f => f !== qe.dataset.quitarexist); qe.closest('.pv').remove(); return; }
     const img = e.target.closest('img[data-foto]');
-    if (img && img.src) modal(`<img src="${img.src}" style="width:100%;border-radius:10px;display:block" alt="Foto"><button class="btn block" style="margin-top:12px" data-a="cerrarModal">Cerrar</button>`);
+    if (img && img.src && !img.closest('[data-form="edit"]')) modal(`<img src="${img.src}" style="width:100%;border-radius:10px;display:block" alt="Foto"><button class="btn block" style="margin-top:12px" data-a="cerrarModal">Cerrar</button>`);
   });
 
   // Refrescar contadores cada minuto

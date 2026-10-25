@@ -279,3 +279,49 @@ table.t td{padding:7px 4px;border-top:1px solid var(--line)}
 .netchip.off{background:rgba(233,180,76,.18);color:var(--warn)}
 .instalar-card{border-color:rgba(190,175,135,.45)}
 ol.pasos{padding-left:20px;line-height:1.7;margin:8px 0 12px}
+
+/* ---------- v3.1: manos y marcas de oportunidades ---------- */
+.mano{font-size:10px;font-weight:700;letter-spacing:.5px;color:var(--gold);border:1px solid rgba(190,175,135,.45);padding:1px 6px;border-radius:5px;margin-left:6px;vertical-align:middle;text-transform:uppercase}
+.mano-btn{background:var(--bg);border:1px solid var(--line2);color:var(--tx3);font-size:11px;font-weight:700;padding:3px 8px;border-radius:12px;cursor:pointer;white-space:nowrap}
+.mano-btn.on{color:var(--gold);border-color:rgba(190,175,135,.5)}
+.pin-op{background:none;border:0}
+.pin{width:34px;height:34px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);background:var(--c);border:2px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.45);display:grid;place-items:center}
+.pin span{transform:rotate(45deg);font-size:17px;line-height:1}
+.pop{font-family:var(--sans);font-size:13px;line-height:1.45;color:#222;min-width:180px}
+.pop .pop-t{font-weight:800;font-size:12px;letter-spacing:.3px;margin-bottom:2px;filter:brightness(.8)}
+.pop .muted{color:#666;font-size:12px}
+.pop a{color:#1f7a4d}
+.pop .btn.wa{color:#fff;font-size:12px;padding:5px 9px}
+.leyenda{display:flex;flex-wrap:wrap;gap:6px 12px;margin-top:8px;font-size:12px;color:var(--tx2)}
+.leyenda span{display:inline-flex;align-items:center;gap:5px}
+.leyenda i{font-style:normal;width:22px;height:22px;border-radius:50%;background:var(--c);display:grid;place-items:center;font-size:12px;border:1.5px solid #fff}
+.map-leyenda{position:absolute;left:10px;bottom:10px;z-index:500;background:rgba(11,11,12,.88);border:1px solid var(--line2);border-radius:10px;padding:2px 10px 8px;max-width:calc(100% - 80px)}
+.map-leyenda:empty{display:none}
+
+.cartel{width:20px;height:20px;display:block}
+.pin .cartel{width:22px;height:22px}
+.leyenda i .cartel{width:15px;height:15px}
+.pop-t .cartel{width:16px;height:16px;display:inline-block;vertical-align:-3px}
+
+/* ---------- v4: editar, seguimiento, gestión anterior ---------- */
+.acc-casa{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.acc-casa .btn.ghost{padding:6px 10px;font-size:12px}
+.acc-casa .btn.on{border-color:var(--gold);color:var(--gold)}
+.notas{margin-top:8px;border-top:1px dashed var(--line2);padding-top:8px}
+.nota{display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid var(--line)}
+.nota:last-of-type{border-bottom:0}
+.nota .nf{font-size:12px;font-weight:700;color:var(--gold);min-width:46px;padding-top:1px}
+.nota .nt{flex:1;font-size:14px;white-space:pre-wrap}
+.nota .nt small{display:block;color:var(--tx3);font-size:11px;margin-top:2px}
+.nota .x{background:none;border:0;color:var(--tx3);cursor:pointer}
+.nota-form{display:grid;gap:8px;margin-top:8px}
+.nota-form .btn{justify-self:end}
+.chk{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--tx2)}
+.chk input{width:16px;height:16px;accent-color:var(--gold)}
+.vis.anterior{opacity:.85;border-style:dashed}
+.ant-tag{font-size:10px;font-weight:700;letter-spacing:.6px;color:var(--tx3);text-transform:uppercase}
+.ant-h{margin:14px 0 2px;font-size:12px;font-weight:700;color:var(--tx3);letter-spacing:.4px}
+
+.telhint{font-size:12px;margin-top:4px;min-height:0}
+.telhint .ok{color:var(--ok)}
+.telhint .mal{color:var(--warn)}

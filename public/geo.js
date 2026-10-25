@@ -93,6 +93,19 @@
   }
   const midpoint = line => pointAlong(line, lineLength(line) / 2);
 
+  // Punto a 'm' metros del medio de la cuadra, hacia adentro de la zona (para saber qué vereda le toca)
+  function puntoInterior(line, ring, m = 14) {
+    const L = lineLength(line); if (L < 10) return null;
+    const a = xy(pointAlong(line, L / 2 - 4)), b = xy(pointAlong(line, L / 2 + 4)), c = xy(midpoint(line));
+    let dx = b[0] - a[0], dy = b[1] - a[1]; const n = Math.hypot(dx, dy) || 1; dx /= n; dy /= n;
+    const p1 = ll([c[0] - dy * m, c[1] + dx * m]), p2 = ll([c[0] + dy * m, c[1] - dx * m]);
+    const in1 = pip(p1, ring), in2 = pip(p2, ring);
+    if (in1 && !in2) return p1; if (in2 && !in1) return p2;
+    return null;
+  }
+  // Puntos repartidos a lo largo de la cuadra (para ubicar marcas en el mapa)
+  function puntoEnCuadra(line, frac) { return pointAlong(line, lineLength(line) * Math.max(0.08, Math.min(0.92, frac))); }
+
   // Superposición aproximada entre dos polígonos (m²), ignorando el borde compartido
   function overlapArea(A, B, paso = 8, borde = 7) {
     const ba = bboxOf(A), bb = bboxOf(B);
@@ -563,6 +576,6 @@ out center tags;`, 45000);
   root.Geo = {
     BBOX, BARRIOS, norm, pip, area, centroid, dist, distPtLine, overlapArea, bboxOf, closeRing,
     loadBarrios, loadCallejero, loadDirecciones, barrioDe, calibrarCalle, asignarAlturas, Callejero, assembleRings, midpoint,
-    mismaCalle, aplicarAlturasOficiales,
+    mismaCalle, aplicarAlturasOficiales, puntoInterior, puntoEnCuadra,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

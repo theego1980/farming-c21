@@ -112,9 +112,11 @@
       let d;
       try {
         if (!navigator.onLine) throw new Error('Failed to fetch');
-        const [perfiles, zonas, asignaciones, visitas, jornadas] = await Promise.all(
-          ['perfiles', 'zonas', 'asignaciones', 'visitas', 'jornadas'].map(t => this.todo(t)));
-        d = { perfiles, zonas, asignaciones, visitas, jornadas };
+        const [perfiles, zonas, asignaciones, visitas, jornadas, notas] = await Promise.all([
+          ...['perfiles', 'zonas', 'asignaciones', 'visitas', 'jornadas'].map(t => this.todo(t)),
+          this.todo('notas').catch(e => { if (esRed(e)) throw e; return []; }), // si todavía no se corrió la actualización v4
+        ]);
+        d = { perfiles, zonas, asignaciones, visitas, jornadas, notas };
         this.offline = false;
         const yo = lsGet('farming_perfil');
         if (yo && yo.rol !== 'admin') lsSet(k, d); // el asesor guarda una copia para trabajar sin señal
@@ -122,6 +124,7 @@
         if (!esRed(e)) throw e;
         d = lsGet(k);
         if (!d) throw new Error('Sin conexión. Abrí la app una vez con señal para poder usarla sin conexión.');
+        d.notas = d.notas || [];
         this.offline = true;
       }
       // Aplicar lo que está esperando para subirse
@@ -148,6 +151,7 @@
             if (it.op === 'insert') {
               const row = { ...it.row }; const tmp = row.id;
               delete row.id; delete row.pendiente;
+              for (const c in row) if (typeof row[c] === 'string' && mapa.has(row[c])) row[c] = mapa.get(row[c]); // referencias a datos cargados sin señal
               if (Array.isArray(row.fotos)) {
                 const reales = [];
                 for (const f of row.fotos) {
@@ -164,6 +168,8 @@
               const id = mapa.get(it.id) || it.id;
               if (String(id).startsWith('tmp-')) { await Cola.borrar(it.k); continue; }
               const q = it.op === 'update' ? this.c.from(it.tabla).update(it.row).eq('id', id) : this.c.from(it.tabla).delete().eq('id', id);
+              if (it.op === 'update' && it.row.fotos) for (let i = 0; i < it.row.fotos.length; i++) { const f = it.row.fotos[i]; if (String(f).startsWith('pendiente:')) { const bl = await Cola.blob(f.slice(10)); it.row.fotos[i] = bl ? await this._subir(bl) : null; } }
+              if (it.op === 'update' && it.row.fotos) it.row.fotos = it.row.fotos.filter(Boolean);
               const { error } = await q; if (error) throw error;
             }
             await Cola.borrar(it.k); subidos++;
@@ -211,7 +217,8 @@
     }
     async agregar(tabla, row) {
       const offline = async () => {
-        const r = { ...row, id: 'tmp-' + uid(), asesor_id: row.asesor_id || await this.miId(), creado: new Date().toISOString(), pendiente: true };
+        const yo = await this.miId();
+        const r = { ...row, id: 'tmp-' + uid(), ...(tabla === 'notas' ? { autor_id: yo } : { asesor_id: row.asesor_id || yo }), creado: new Date().toISOString(), pendiente: true };
         await this.encolar({ op: 'insert', tabla, row: r });
         return r;
       };
@@ -228,7 +235,7 @@
         const it = (await Cola.todos()).find(x => x.op === 'insert' && x.row.id === id);
         if (it) { Object.assign(it.row, row); await Cola.guardar(it); this.avisar(); return it.row; }
       }
-      if (!navigator.onLine) { await this.encolar({ op: 'update', tabla, id, row }); return { id, ...row }; }
+      if (!navigator.onLine || (row.fotos || []).some(f => String(f).startsWith('pendiente:'))) { await this.encolar({ op: 'update', tabla, id, row }); return { id, ...row }; }
       const { data, error } = await this.c.from(tabla).update(row).eq('id', id).select().single();
       if (error) { if (esRed(error)) { await this.encolar({ op: 'update', tabla, id, row }); return { id, ...row }; } throw error; }
       return data;
@@ -247,6 +254,10 @@
       const { error } = await this.c.from(tabla).delete().eq('id', id); if (error) throw error;
     }
     // Fotos: se guardan en la carpeta del asesor y se ven con enlaces temporales
+    async borrarFotos(paths) {
+      const reales = (paths || []).filter(p => !String(p).startsWith('pendiente:'));
+      if (reales.length && navigator.onLine) { try { await this.c.storage.from('fotos').remove(reales); } catch { } }
+    }
     async _subir(blob) {
       const id = await this.miId();
       const path = `${id}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
@@ -282,8 +293,9 @@
       this.d = d || {
         yo: null,
         perfiles: [{ id: 'admin', nombre: 'Diego', apellido: 'Pulvirenti', email: 'broker@demo', rol: 'admin', creado: new Date().toISOString() }],
-        zonas: [], asignaciones: [], visitas: [], jornadas: [],
+        zonas: [], asignaciones: [], visitas: [], jornadas: [], notas: [],
       };
+      this.d.notas = this.d.notas || [];
     }
     save() { try { localStorage.setItem(this.k, JSON.stringify(this.d)); } catch { } }
     async perfil() { return this.d.perfiles.find(p => p.id === this.d.yo) || null; }
@@ -298,7 +310,10 @@
         d.asignaciones = d.asignaciones.filter(a => a.asesor_id === yo.id);
         const zs = new Set(d.asignaciones.filter(a => a.estado !== 'finalizada').map(a => a.zona_id));
         d.zonas = d.zonas.filter(z => zs.has(z.id));
-        d.visitas = d.visitas.filter(v => v.asesor_id === yo.id);
+        const asigZona = new Set(this.d.asignaciones.filter(a => zs.has(a.zona_id)).map(a => a.id));
+        d.visitas = d.visitas.filter(v => v.asesor_id === yo.id || asigZona.has(v.asignacion_id));
+        const vis = new Set(d.visitas.map(v => v.id));
+        d.notas = (d.notas || []).filter(n => vis.has(n.visita_id));
         d.jornadas = d.jornadas.filter(v => v.asesor_id === yo.id);
         d.perfiles = d.perfiles.filter(p => p.id === yo.id);
       }
@@ -341,14 +356,16 @@
     async urlsFotos(paths) { const o = {}; paths.forEach(p => o[p] = p); return o; }
     async liberar(a) { const x = this.d.asignaciones.find(y => y.id === a.id); Object.assign(x, { estado: 'finalizada', finalizada: new Date().toISOString(), motivo_fin: 'liberada' }); this.save(); return x; }
     async agregar(tabla, row) {
-      const a = this.d.asignaciones.find(x => x.id === row.asignacion_id);
+      const asigId = tabla === 'notas' ? (this.d.visitas.find(v => v.id === row.visita_id) || {}).asignacion_id : row.asignacion_id;
+      const a = this.d.asignaciones.find(x => x.id === asigId);
       const yo = await this.perfil();
       if (yo.rol !== 'admin' && (!a || a.estado !== 'activa' || new Date(a.vence) < new Date())) throw new Error('Tu plazo de la zona venció: no se pueden cargar datos.');
-      const r = { ...row, id: uid(), asesor_id: row.asesor_id || yo.id, creado: new Date().toISOString() };
+      const r = tabla === 'notas' ? { ...row, id: uid(), autor_id: yo.id, creado: new Date().toISOString() } : { ...row, id: uid(), asesor_id: row.asesor_id || yo.id, creado: new Date().toISOString() };
       this.d[tabla].push(r); this.save(); return r;
     }
     async editar(tabla, id, row) { const x = this.d[tabla].find(y => y.id === id); Object.assign(x, row); this.save(); return x; }
-    async borrar(tabla, id) { this.d[tabla] = this.d[tabla].filter(x => x.id !== id); this.save(); }
+    async borrar(tabla, id) { this.d[tabla] = this.d[tabla].filter(x => x.id !== id); if (tabla === 'visitas') this.d.notas = this.d.notas.filter(n => n.visita_id !== id); this.save(); }
+    async borrarFotos() { }
     // utilidades sólo para la demo
     simularVencimiento(asigId) { const a = this.d.asignaciones.find(x => x.id === asigId); a.vence = new Date(Date.now() - 3600e3).toISOString(); this.save(); }
     reiniciar() { localStorage.removeItem(this.k); this.load(); }
