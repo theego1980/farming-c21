@@ -23,15 +23,27 @@ export default manejar(async (req) => {
     perfil = (await sb(`/rest/v1/perfiles?email=eq.${encodeURIComponent(email)}&select=*`))?.[0];
     if (!perfil) {
       passTemporal = passwordTemporal();
-      const user = await sb('/auth/v1/admin/users', {
-        method: 'POST',
-        body: { email, password: passTemporal, email_confirm: true, user_metadata: { nombre, apellido } },
-      });
-      perfil = (await sb(`/rest/v1/perfiles?id=eq.${user.id}&select=*`))?.[0];
+      let userId = null;
+      try {
+        const user = await sb('/auth/v1/admin/users', {
+          method: 'POST',
+          body: { email, password: passTemporal, email_confirm: true, user_metadata: { nombre, apellido } },
+        });
+        userId = user.id;
+      } catch (e) {
+        // El mail ya tenía usuario (por ejemplo, de una prueba anterior) pero no perfil: se reutiliza y se le da contraseña nueva
+        if (!/already|registered|exists/i.test(e.message)) throw e;
+        const lista = await sb('/auth/v1/admin/users?page=1&per_page=1000');
+        const u = (lista.users || lista || []).find(x => String(x.email || '').toLowerCase() === email);
+        if (!u) throw e;
+        userId = u.id;
+        await sb(`/auth/v1/admin/users/${userId}`, { method: 'PUT', body: { password: passTemporal, email_confirm: true } });
+      }
+      perfil = (await sb(`/rest/v1/perfiles?id=eq.${userId}&select=*`))?.[0];
       if (!perfil) {
         perfil = (await sb('/rest/v1/perfiles', {
           method: 'POST', prefer: 'return=representation',
-          body: { id: user.id, email, nombre, apellido, rol: 'asesor' },
+          body: { id: userId, email, nombre, apellido, rol: 'asesor' },
         }))[0];
       }
     } else if (!perfil.nombre || !perfil.apellido) {
@@ -41,6 +53,17 @@ export default manejar(async (req) => {
     }
   }
   if (!perfil) throw new HttpError(404, 'No encontré al asesor.');
+
+  // Asesor que ya existía pero nunca entró a la plataforma: se le genera una contraseña nueva y va en el mail
+  if (!passTemporal && perfil.rol !== 'admin') {
+    try {
+      const u = await sb(`/auth/v1/admin/users/${perfil.id}`);
+      if (!u.last_sign_in_at) {
+        passTemporal = passwordTemporal();
+        await sb(`/auth/v1/admin/users/${perfil.id}`, { method: 'PUT', body: { password: passTemporal, email_confirm: true } });
+      }
+    } catch (e) { console.warn('No pude revisar el acceso del asesor', e.message); }
+  }
 
   // 2) Cerrar la asignación vigente (si la había) y crear la nueva por 90 días
   const ahora = new Date();
@@ -77,7 +100,7 @@ ${passTemporal ? `<div style="margin-top:20px;padding:14px 16px;background:#0B0B
 <div style="color:#BEAF87;font-size:12px;letter-spacing:2px;font-weight:bold">TUS DATOS DE INGRESO</div>
 <div style="margin-top:6px">Usuario: <b>${esc(perfil.email)}</b><br>Contraseña provisoria: <b style="font-family:monospace;font-size:16px">${passTemporal}</b></div>
 <div style="font-size:13px;color:#8C877C;margin-top:6px">Podés cambiarla desde tu panel, en “Mi cuenta”.</div></div>`
-    : `<p style="font-size:14px;color:#8C877C">Ingresá con tu usuario y contraseña de siempre.</p>`}`;
+    : `<p style="font-size:14px;color:#8C877C">Ingresá con tu usuario (${esc(perfil.email)}) y tu contraseña de siempre. Si no la recordás, pedile al broker que te genere una nueva.</p>`}`;
 
   let mail = { enviado: false, error: null };
   try {
