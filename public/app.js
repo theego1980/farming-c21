@@ -835,7 +835,8 @@
     const msg = `Hola ${p.nombre || ''}! ${z ? `Te asigné la zona de farming *${z.nombre}*.` : 'Te paso tus datos de acceso al panel de farming.'}\nIngresá en ${url}\nUsuario: ${p.email || ''}${r.passTemporal ? `\nContraseña: ${r.passTemporal}` : ''}`;
     modal(`<h3>${r.mail?.enviado ? '✓ Listo, mail enviado' : 'Listo'}</h3>
       ${r.mail?.enviado ? `<p class="muted" style="font-size:14px">Le llegó a ${esc(p.email || 'el asesor')} el mail${z ? ' con la zona' : ''} y el acceso.</p>` : `<div class="note">${esc(r.mail?.error || 'No se pudo enviar el mail.')} Compartile los datos por WhatsApp.</div>`}
-      ${r.passTemporal ? `<div class="cred">Usuario: <code>${esc(p.email || '')}</code><br>Contraseña provisoria: <code>${esc(r.passTemporal)}</code></div>` : ''}
+      ${r.passTemporal ? `<div class="cred">Usuario: <code>${esc(p.email || '')}</code><br>Contraseña provisoria: <code>${esc(r.passTemporal)}</code></div>`
+        : p.id && z ? `<div class="note" style="margin-top:10px">${esc(p.nombre || 'El asesor')} ya tenía usuario y entra con su contraseña de siempre. Si no la recuerda o nunca entró, generale una nueva:</div><button class="btn block" style="margin-top:8px" data-a="reset" data-p="${p.id}">🔑 Generar contraseña nueva</button>` : ''}
       <div class="row" style="margin-top:16px;justify-content:flex-end">
         <a class="btn" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(msg)}">Enviar por WhatsApp</a>
         <button class="btn primary" data-a="cerrarModal">Cerrar</button></div>`);
