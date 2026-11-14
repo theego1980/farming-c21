@@ -379,11 +379,7 @@
     const actIds = new Set(S.d.asignaciones.filter(a => estadoAsig(a) === 'activa').map(a => a.id));
     const np = pendientes(S.d.visitas.filter(v => actIds.has(v.asignacion_id))).length;
     tituloPestana(nv + np);
-    const nav = `<nav class="nav">
-      <button class="${S.vista === 'mapa' ? 'on' : ''}" data-v="mapa">Mapa</button>
-      <button class="${S.vista === 'zonas' ? 'on' : ''}" data-v="zonas">Zonas${nv ? `<span class="dot">${nv}</span>` : ''}</button>
-      <button class="${S.vista === 'oport' ? 'on' : ''}" data-v="oport">Contactos${np ? `<span class="dot warn">${np}</span>` : ''}</button>
-      <button class="${S.vista === 'asesores' ? 'on' : ''}" data-v="asesores">Equipo</button></nav>`;
+    const nav = navAdmin(nv, np);
     if (S.vista === 'mapa') {
       if (!S.map || !document.getElementById('map')) {
         $('#app').innerHTML = topbar(nav) + `<main><div class="map-wrap"><div id="map"></div>
@@ -399,6 +395,68 @@
       S.vista === 'zonas' ? vistaZonas() : S.vista === 'oport' ? vistaOportunidades() : vistaAsesores();
     }
     cambioRed();
+  }
+
+  function navAdmin(nv, np) {
+    const nn = S.vista === 'asesores' ? 0 : novedadesNuevas().length;
+    return `<nav class="nav">
+      <button class="${S.vista === 'mapa' ? 'on' : ''}" data-v="mapa">Mapa</button>
+      <button class="${S.vista === 'zonas' ? 'on' : ''}" data-v="zonas">Zonas${nv ? `<span class="dot">${nv}</span>` : ''}</button>
+      <button class="${S.vista === 'oport' ? 'on' : ''}" data-v="oport">Contactos${np ? `<span class="dot warn">${np}</span>` : ''}</button>
+      <button class="${S.vista === 'asesores' ? 'on' : ''}" data-v="asesores">Equipo${nn ? `<span class="dot nov">${nn}</span>` : ''}</button></nav>`;
+  }
+
+  // ---------- Novedades del equipo ----------
+  const tms = x => x ? new Date(x).getTime() : 0;
+  function hace(ts) {
+    const m = Math.round((Date.now() - tms(ts)) / 60000);
+    if (m < 1) return 'recién'; if (m < 60) return `hace ${m} min`;
+    const h = Math.round(m / 60); if (h < 24) return `hace ${h} h`;
+    const d = Math.round(h / 24); return d === 1 ? 'ayer' : `hace ${d} días`;
+  }
+  function novedades() {
+    const admins = new Set(S.d.perfiles.filter(p => p.rol === 'admin').map(p => p.id));
+    const limite = Date.now() - 30 * DIA;
+    const zonaDe = id => { const a = S.d.asignaciones.find(x => x.id === id); return a ? S.d.zonas.find(z => z.id === a.zona_id) : null; };
+    const ev = [];
+    for (const v of S.d.visitas) {
+      if (v.pendiente) continue;
+      if (tms(v.creado) >= limite && !admins.has(v.asesor_id)) ev.push({ ts: v.creado, tipo: 'casa', quien: v.asesor_id, v, z: zonaDe(v.asignacion_id) });
+      if (['tasacion', 'captacion'].includes(v.etapa)) {
+        const f = v.etapa === 'captacion' ? v.captacion_fecha : v.tasacion_fecha;
+        const ets = v.etapa_ts || (f ? f + 'T12:00:00-03:00' : null);
+        if (ets && tms(ets) >= limite && !(v.etapa_por && admins.has(v.etapa_por))) ev.push({ ts: ets, tipo: 'etapa', quien: v.etapa_por || v.asesor_id, v, z: zonaDe(v.asignacion_id) });
+      }
+    }
+    for (const j of S.d.jornadas) if (!j.pendiente && tms(j.creado) >= limite && !admins.has(j.asesor_id)) ev.push({ ts: j.creado, tipo: 'jornada', quien: j.asesor_id, j, z: zonaDe(j.asignacion_id) });
+    for (const n of S.d.notas || []) {
+      if (n.pendiente || tms(n.creado) < limite || admins.has(n.autor_id)) continue;
+      const v = S.d.visitas.find(x => x.id === n.visita_id); if (v) ev.push({ ts: n.creado, tipo: 'nota', quien: n.autor_id, v, n, z: zonaDe(v.asignacion_id) });
+    }
+    return ev.sort((a, b) => tms(b.ts) - tms(a.ts));
+  }
+  const marcaVisto = () => S.vistoPrevio !== undefined ? S.vistoPrevio : (S.yo && S.yo.visto_novedades) || null;
+  const esNueva = e => tms(e.ts) > tms(marcaVisto());
+  const novedadesNuevas = () => S.d ? novedades().filter(esNueva) : [];
+  function lineaNovedad(e) {
+    const quien = `<b>${esc(nombre(perfil(e.quien)) || 'Asesor')}</b>`;
+    const dir = e.v ? `<b>${esc(e.v.calle)} ${e.v.altura ?? ''}</b>` : '';
+    const t = e.v ? tipoOport(e.v) : null;
+    let ic = '🏠', txt = '';
+    if (e.tipo === 'casa') { txt = `${quien} cargó ${dir}${t && MARCAS[t] && t !== 'tas' && t !== 'cap' ? ` · ${MARCAS[t][2]}` : e.v.resultado ? ` · ${esc(e.v.resultado)}` : ''}`; if (t === 'ven') ic = '🚨'; if (t === 'col') ic = CARTEL; }
+    else if (e.tipo === 'etapa') { ic = e.v.etapa === 'captacion' ? '🏆' : '💰'; txt = `${quien} pasó ${dir} a <b>${e.v.etapa === 'captacion' ? 'Captación firmada' : 'Tasación hecha'}</b>`; }
+    else if (e.tipo === 'jornada') { ic = '⏱'; txt = `${quien} registró una jornada de <b>${num(e.j.horas)} h</b>${e.j.notas ? ` · “${esc(e.j.notas.slice(0, 70))}”` : ''}`; }
+    else if (e.tipo === 'nota') { ic = '🗒'; txt = `${quien} anotó en ${dir}: “${esc(e.n.texto.slice(0, 90))}${e.n.texto.length > 90 ? '…' : ''}”`; }
+    const oport = e.tipo === 'etapa' || (e.tipo === 'casa' && t);
+    return `<div class="nov ${esNueva(e) ? 'nueva' : ''} ${oport ? 'oport' : ''}" ${e.z ? `data-zona="${e.z.id}"` : ''}>
+      <span class="nov-ic">${ic}</span><div class="nov-t">${txt}<small>${e.z ? esc(e.z.nombre) + ' · ' : ''}${hace(e.ts)}</small></div>${esNueva(e) ? '<span class="nov-new">Nuevo</span>' : ''}</div>`;
+  }
+  async function marcarNovedadesVistas() {
+    const ahoraISO = new Date().toISOString();
+    S.vistoPrevio = (S.yo && S.yo.visto_novedades) || null;
+    if (S.yo) S.yo.visto_novedades = ahoraISO;
+    const yo = S.d.perfiles.find(p => p.id === S.yo.id); if (yo) yo.visto_novedades = ahoraISO;
+    try { await S.be.editar('perfiles', S.yo.id, { visto_novedades: ahoraISO }); } catch (e) { console.warn('visto_novedades', e.message); }
   }
 
   // Mapa base de OpenStreetMap (gratuito, sin clave)
@@ -1003,6 +1061,9 @@
     const maxH = Math.max(1, ...filas.map(f => f.horas)), maxC = Math.max(1, ...filas.map(f => f.contactos));
     const medalla = i => filas[i] && (filas[i].captaciones || filas[i].tasaciones || filas[i].contactos) ? ['🥇', '🥈', '🥉'][i] || '' : '';
     el.innerHTML = `<div class="row" style="justify-content:space-between"><h2>Equipo <span class="muted" style="font-size:15px;font-weight:500">(${ases.length})</span></h2></div>
+      ${(() => { const ev = novedades(); const nuevas = ev.filter(esNueva).length; const n = S.novN || 8;
+        return `<div class="card novedades"><div class="row" style="justify-content:space-between"><h3 style="font-size:16px">Novedades${nuevas ? ` <span class="nov-cnt">${nuevas} ${nuevas === 1 ? 'nueva' : 'nuevas'}</span>` : ''}</h3><span class="muted" style="font-size:12px">últimos 30 días</span></div>
+          ${ev.length ? ev.slice(0, n).map(lineaNovedad).join('') + (ev.length > n ? `<button class="btn sm ghost block" style="margin-top:8px" data-a="masNovedades">Ver más (${ev.length - n})</button>` : '') : '<p class="muted" style="font-size:13px;margin:8px 0 0">Todavía no hay movimiento del equipo.</p>'}</div>`; })()}
       <div class="filters">${[['vigente', 'Zonas vigentes'], ['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['todo', 'Histórico']].map(([k, t]) => `<button class="${per === k ? 'on' : ''}" data-per="${k}">${t}</button>`).join('')}</div>
       ${ases.length ? `<div class="card equipo-tot"><div class="stats six">
         <div class="stat"><b>${num(tot('horas'))}</b><span>HORAS</span></div><div class="stat"><b>${tot('jornadas')}</b><span>JORNADAS</span></div>
@@ -1012,6 +1073,9 @@
         <div class="row" style="justify-content:space-between;align-items:flex-start;gap:8px">
           <div style="min-width:0"><b style="font-size:16px">${medalla(i)} ${esc(nombre(f.p))}</b><div class="muted" style="font-size:12px">${esc(f.p.email)} · ${f.ult ? 'últ. actividad ' + fecha(f.ult) : 'sin actividad'}</div></div>
           <button class="btn sm ghost" data-a="reset" data-p="${f.p.id}">Reenviar acceso</button></div>
+        ${(() => { const ev = novedades().filter(e => e.quien === f.p.id && esNueva(e)); if (!ev.length) return '';
+          const c = k => ev.filter(e => e.tipo === k).length; const partes = [[c('casa'), 'casa', 'casas'], [c('jornada'), 'jornada', 'jornadas'], [c('nota'), 'nota', 'notas'], [c('etapa'), 'cambio de etapa', 'cambios de etapa']].filter(x => x[0]).map(([n, s1, s2]) => `${n} ${n === 1 ? s1 : s2}`);
+          return `<div class="ase-nuevo">🆕 ${partes.join(', ').replace(/, ([^,]*)$/, ' y $1')} desde tu última visita</div>`; })()}
         <div class="row" style="margin-top:8px">${f.vig.length ? f.vig.map(a => { const z = S.d.zonas.find(x => x.id === a.zona_id); const e = estadoAsig(a); return z ? `<button class="badge ${e === 'vencida' ? 'vencida' : 'activa'}" style="border:0;cursor:pointer" data-zona="${z.id}">${esc(z.nombre)} · ${e === 'vencida' ? 'vencida' : restante(a).txt}</button>` : ''; }).join('') : '<span class="badge libre">Sin zona vigente</span>'}${f.pend ? `<span class="badge pronto">☎ ${f.pend} llamados atrasados</span>` : ''}</div>
         <div class="metr">
           <div><span>Cobertura</span><b>${f.cob == null ? '—' : f.cob + '%'}</b><i class="mb"><em style="width:${f.cob || 0}%"></em></i></div>
@@ -1222,7 +1286,9 @@
   // =====================================================================
   document.addEventListener('click', async e => {
     const t = e.target;
-    const v = t.closest('[data-v]'); if (v) { if (S.dibujo) terminarDibujo(true); cerrarSheet(); S.vista = v.dataset.v; renderAdmin(); return; }
+    const v = t.closest('[data-v]'); if (v) { if (S.dibujo) terminarDibujo(true); cerrarSheet(); const antes = S.vista; S.vista = v.dataset.v;
+      if (S.vista === 'asesores' && antes !== 'asesores') await marcarNovedadesVistas(); else if (S.vista !== 'asesores') S.vistoPrevio = undefined;
+      renderAdmin(); return; }
     const f = t.closest('[data-f]'); if (f) { S.filtro = f.dataset.f; vistaZonas(); return; }
     const cat = t.closest('[data-cat]'); if (cat) { S.bus.cat = cat.dataset.cat; S.bus.n = 40; pintarResultados(); return; }
     const at = t.closest('[data-atab]'); if (at) { S.asesorTab = at.dataset.atab; window.scrollTo(0, 0); renderAsesor(); return; }
@@ -1370,6 +1436,7 @@
       case 'csvBusqueda': csvContactos(filtrarContactos().lista); break;
       case 'verMasBusqueda': S.bus.n += 40; pintarResultados(); break;
       case 'limpiarBusqueda': S.bus = null; vistaOportunidades(); break;
+      case 'masNovedades': S.novN = (S.novN || 8) + 15; vistaAsesores(); break;
       case 'editarCasa': { const v = S.d.visitas.find(x => x.id === b.dataset.id); if (v) modalEditar(v); break; }
       case 'guardarEdicion': {
         const form = b.closest('[data-form]'); const v = S.d.visitas.find(x => x.id === b.dataset.id); if (!v) break;
@@ -1432,12 +1499,14 @@
         if (etapaDe(v) === et) break;
         const textos = { contacto: 'Volver la etapa a <b>Contacto</b>.', tasacion: 'Marcar que se hizo la <b>tasación</b> de esta propiedad.', captacion: '🏆 Marcar la <b>captación firmada</b> (autorización de venta). Deja de recordarte llamarlo.' };
         if (!await confirmar('Etapa: ' + ETAPAS.find(x => x[0] === et)[1], textos[et], 'Confirmar')) break;
-        const cambio = { etapa: et };
+        const cambio = { etapa: et, etapa_ts: new Date().toISOString(), etapa_por: S.yo.id };
         if (et === 'tasacion' && !v.tasacion_fecha) cambio.tasacion_fecha = hoyISO();
         if (et === 'captacion') cambio.captacion_fecha = hoyISO();
         if (et === 'contacto') { cambio.captacion_fecha = null; cambio.tasacion_fecha = null; }
         if (et === 'tasacion') cambio.captacion_fecha = null;
-        await conCarga(null, async () => { await S.be.editar('visitas', id, cambio); toast(et === 'captacion' ? '🏆 ¡Captación registrada!' : 'Etapa actualizada'); await refrescar(); });
+        await conCarga(null, async () => {
+          try { await S.be.editar('visitas', id, cambio); }
+          catch (er) { if (!/etapa_ts|etapa_por|column/i.test(er.message || '')) throw er; delete cambio.etapa_ts; delete cambio.etapa_por; await S.be.editar('visitas', id, cambio); } toast(et === 'captacion' ? '🏆 ¡Captación registrada!' : 'Etapa actualizada'); await refrescar(); });
         break;
       }
       case 'delVisita': if (await confirmar('Borrar casa', '¿Seguro que querés borrar este registro?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('visitas', b.dataset.id); await refrescarAsesor(); }); } break;
@@ -1476,6 +1545,16 @@
     const img = e.target.closest('img[data-foto]');
     if (img && img.src && !img.closest('[data-form="edit"]')) modal(`<img src="${img.src}" style="width:100%;border-radius:10px;display:block" alt="Foto"><button class="btn block" style="margin-top:12px" data-a="cerrarModal">Cerrar</button>`);
   });
+
+  // Broker: buscar novedades cada 3 minutos y actualizar el globito de Equipo
+  setInterval(async () => {
+    if (!S.yo || S.yo.rol !== 'admin' || !S.d || document.visibilityState !== 'visible' || $('#modal').classList.contains('open') || S.dibujo) return;
+    if (document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName)) return;
+    try { await recargar(); } catch { return; }
+    const actIds = new Set(S.d.asignaciones.filter(a => estadoAsig(a) === 'activa').map(a => a.id));
+    const h = $('header.top'); if (h) h.outerHTML = topbar(navAdmin(vencidas().length, pendientes(S.d.visitas.filter(v => actIds.has(v.asignacion_id))).length));
+    if (S.vista === 'mapa' && S.map) dibujarZonas();
+  }, 180000);
 
   // Refrescar contadores cada minuto
   setInterval(() => {

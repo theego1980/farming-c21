@@ -338,3 +338,19 @@ ol.pasos{padding-left:20px;line-height:1.7;margin:8px 0 12px}
 
 .asesor-tabs{margin-top:0}
 
+
+/* ---------- novedades del equipo ---------- */
+.nav .dot.nov{background:var(--gold);color:var(--bg)}
+.novedades{margin-top:12px}
+.nov-cnt{font-size:11px;font-weight:800;background:var(--gold);color:var(--bg);padding:2px 8px;border-radius:10px;vertical-align:middle;margin-left:6px}
+.nov{display:flex;gap:10px;align-items:flex-start;padding:10px 8px;border-top:1px solid var(--line);cursor:pointer;border-radius:8px}
+.nov:first-of-type{margin-top:8px}
+.nov:hover{background:var(--card2)}
+.nov-ic{width:26px;text-align:center;font-size:17px;flex:none;display:grid;place-items:center}
+.nov-ic .cartel{width:20px;height:20px}
+.nov-t{flex:1;font-size:14px;line-height:1.4}
+.nov-t small{display:block;color:var(--tx3);font-size:12px;margin-top:2px}
+.nov-new{font-size:10px;font-weight:800;letter-spacing:.5px;color:var(--gold);border:1px solid rgba(190,175,135,.5);padding:2px 6px;border-radius:6px;flex:none}
+.nov.nueva{background:rgba(190,175,135,.06)}
+.nov.oport .nov-t b:last-of-type{color:var(--gold2)}
+.ase-nuevo{margin-top:8px;font-size:13px;font-weight:600;color:var(--gold);background:var(--golddim);border-radius:8px;padding:6px 10px}
