@@ -73,10 +73,24 @@
     const a = Math.floor(m / 12), mm = m % 12;
     return `${a} ${a === 1 ? 'año' : 'años'}${mm ? ` y ${mm} ${mm === 1 ? 'mes' : 'meses'}` : ''}`;
   }
+  // Calidad del contacto → cada cuántos días se recuerda llamarlo
+  const CALIDADES = [['caliente', '🔥', 'Caliente', 5], ['tibio', '🌤', 'Tibio', 7], ['frio', '❄️', 'Frío', 15]];
+  const calidadDe = v => CALIDADES.find(c => c[0] === v.calidad);
+  const intervaloLlamado = v => (calidadDe(v) || [0, 0, 0, SEGUIR_CADA])[3];
+  const pillCalidad = v => { const c = calidadDe(v); return c ? `<span class="cal cal-${c[0]}">${c[1]} ${c[2]}</span>` : ''; };
   function proximoContacto(v) {
     const base = [v.fecha, v.ultimo_contacto].filter(Boolean).sort().pop();
-    return SEGUIR_CADA - diasDesde(base);
+    return intervaloLlamado(v) - diasDesde(base);
   }
+  // Bloque para elegir la calidad (aparece si quiere vender o está en venta con colega)
+  const bloqueCalidad = (fid, actual = '', visible = false) => `<div class="calidad-campos ${visible ? '' : 'hidden'}"><label class="f">Calidad del contacto</label>
+    <div class="calidad">${CALIDADES.map(([k, ic, t, d]) => `<label><input type="radio" name="calidad_${fid}" value="${k}" data-calidad ${actual === k ? 'checked' : ''}><span>${ic} ${t}<small>llamar en ${d} días</small></span></label>`).join('')}</div></div>`;
+  function actualizarCalidad(form) {
+    const res = form.querySelector('[name=resultado]')?.value;
+    const col = form.querySelector('[data-colega]:checked')?.value === 'si';
+    const b = form.querySelector('.calidad-campos'); if (b) b.classList.toggle('hidden', !(res === 'Interesado en vender' || col));
+  }
+  const calidadElegida = form => { const b = form.querySelector('.calidad-campos'); if (!b || b.classList.contains('hidden')) return ''; return form.querySelector('[data-calidad]:checked')?.value || null; };
 
   const pendientes = vs => vs.filter(v => enSeguimiento(v) && proximoContacto(v) <= 0)
     .sort((a, b) => proximoContacto(a) - proximoContacto(b));
@@ -103,7 +117,7 @@
     const editable = !anterior && (puede || esAdmin());
     const nn = notasDe(v).length, abierta = S.notasAbiertas.has(v.id);
     return `<div class="vis ${anterior ? 'anterior' : ''}">${anterior ? '<div class="ant-tag">Gestión anterior · sólo lectura</div>' : ''}
-      <div class="h"><b>${esc(calle || v.calle)} ${v.altura ?? 's/n'}</b><span class="muted" style="font-size:12px">${fecha(v.fecha)}</span>${puede ? `<button class="x" data-a="delVisita" data-id="${v.id}" title="Borrar">✕</button>` : ''}</div>
+      <div class="h"><b>${esc(calle || v.calle)} ${v.altura ?? 's/n'}</b>${pillCalidad(v)}<span class="muted" style="font-size:12px">${fecha(v.fecha)}</span>${puede ? `<button class="x" data-a="delVisita" data-id="${v.id}" title="Borrar">✕</button>` : ''}</div>
       ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}
       ${v.resultado ? `<div class="r">${esc(v.resultado)}</div>` : ''}
       ${v.en_venta_colega ? `<div class="colega"><div>En venta con <b>${esc(v.venta_inmobiliaria || 'otra inmobiliaria')}</b>${v.venta_valor ? ` · <b>${usd(v.venta_valor)}</b>` : ''}</div>
@@ -762,7 +776,7 @@
       vs.forEach((v, i) => {
         const [emoji, color, txt] = MARCAS[tipoOport(v)];
         const p = Geo.puntoEnCuadra(q.coords, (i + 1) / (vs.length + 1));
-        const html = `<div class="pop"><div class="pop-t" style="color:${color}">${emoji} ${txt}</div><b>${esc(v.calle)} ${v.altura ?? ''}</b>
+        const html = `<div class="pop"><div class="pop-t" style="color:${color}">${emoji} ${txt}</div><b>${esc(v.calle)} ${v.altura ?? ''}</b> ${pillCalidad(v)}
           ${v.propietario || v.telefono ? `<div>${esc(v.propietario)}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}">${esc(v.telefono)}</a>` : ''}</div>` : ''}
           ${v.en_venta_colega ? `<div class="muted">Con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ' · lleva ' + tiempoVenta(v.venta_desde) : ''}</div>` : ''}
           ${conAsesor ? `<div class="muted">${esc(z.nombre)} · ${esc(nombre(perfil(v.asesor_id)))}</div>` : ''}
@@ -930,8 +944,8 @@
   }
 
   // ---------- Vista: contactos (buscador) ----------
-  const CATS = [['todos', 'Todos'], ['oport', '⭐ Oportunidades'], ['ven', '🚨 Con intención de vender'], ['col', CARTEL.replace('class="cartel"', 'class="cartel chip-ic"') + ' En venta con firma colega'], ['tasar', 'Interesado en tasar'], ['tas', '💰 Tasación hecha'], ['cap', '🏆 Captación'], ['pend', '☎ Llamados pendientes'], ['no', 'No quiere vender'], ['otros', 'Otros']];
-  const CAT_TXT = { todos: 'Todas las categorías', oport: '⭐ Oportunidades (todas)', ven: '🚨 Con intención de vender', col: 'En venta con firma colega', tasar: 'Interesado en tasar', tas: '💰 Tasación hecha', cap: '🏆 Captación', pend: '☎ Llamados pendientes', no: 'No quiere vender', otros: 'Otros' };
+  const CATS = [['todos', 'Todos'], ['oport', '⭐ Oportunidades'], ['ven', '🚨 Con intención de vender'], ['col', CARTEL.replace('class="cartel"', 'class="cartel chip-ic"') + ' En venta con firma colega'], ['tasar', 'Interesado en tasar'], ['tas', '💰 Tasación hecha'], ['cap', '🏆 Captación'], ['caliente', '🔥 Calientes'], ['tibio', '🌤 Tibios'], ['frio', '❄️ Fríos'], ['pend', '☎ Llamados pendientes'], ['no', 'No quiere vender'], ['otros', 'Otros']];
+  const CAT_TXT = { todos: 'Todas las categorías', oport: '⭐ Oportunidades (todas)', ven: '🚨 Con intención de vender', col: 'En venta con firma colega', tasar: 'Interesado en tasar', tas: '💰 Tasación hecha', cap: '🏆 Captación', caliente: '🔥 Calientes', tibio: '🌤 Tibios', frio: '❄️ Fríos', pend: '☎ Llamados pendientes', no: 'No quiere vender', otros: 'Otros' };
   function enCategoria(v, k, activas) {
     const ven = v.resultado === 'Interesado en vender' && v.etapa !== 'captacion';
     const col = !!v.en_venta_colega && v.etapa !== 'captacion';
@@ -941,6 +955,7 @@
       case 'todos': return true;
       case 'oport': return ven || col || tas || cap;
       case 'ven': return ven; case 'col': return col; case 'tasar': return tasar; case 'tas': return tas; case 'cap': return cap; case 'no': return no;
+      case 'caliente': case 'tibio': case 'frio': return v.calidad === k && v.etapa !== 'captacion';
       case 'pend': return activas.has(v.asignacion_id) && enSeguimiento(v) && proximoContacto(v) <= 0;
       case 'otros': return !(ven || col || tasar || tas || cap || no);
     }
@@ -1025,9 +1040,9 @@
     cargarFotos($('#bRes'));
   }
   function csvContactos(lista) {
-    const filas = [['Cargado', 'Calle', 'Altura', 'Cuadra', 'Propietario', 'Teléfono', 'Resultado', 'Etapa', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Notas', 'Seguimiento', 'Zona', 'Asesor']];
+    const filas = [['Cargado', 'Calle', 'Altura', 'Cuadra', 'Propietario', 'Teléfono', 'Resultado', 'Calidad', 'Etapa', 'En venta con colega', 'Inmobiliaria', 'Valor USD', 'A la venta desde', 'Último contacto', 'Notas', 'Seguimiento', 'Zona', 'Asesor']];
     lista.forEach(v => { const { q, z } = zonaYCuadraDe(v);
-      filas.push([(v.creado || v.fecha || '').slice(0, 10), v.calle, v.altura ?? '', etiquetaCuadra(q), v.propietario, v.telefono, v.resultado, (ETAPAS.find(x => x[0] === etapaDe(v)) || ['', ''])[1], v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', v.notas, notasDe(v).slice().reverse().map(n => `${n.fecha}: ${n.texto}`).join(' | '), z ? z.nombre : '', nombre(perfil(v.asesor_id))]); });
+      filas.push([(v.creado || v.fecha || '').slice(0, 10), v.calle, v.altura ?? '', etiquetaCuadra(q), v.propietario, v.telefono, v.resultado, (calidadDe(v) || ['', '', ''])[2], (ETAPAS.find(x => x[0] === etapaDe(v)) || ['', ''])[1], v.en_venta_colega ? 'Sí' : 'No', v.venta_inmobiliaria || '', v.venta_valor ?? '', v.venta_desde || '', v.ultimo_contacto || '', v.notas, notasDe(v).slice().reverse().map(n => `${n.fecha}: ${n.texto}`).join(' | '), z ? z.nombre : '', nombre(perfil(v.asesor_id))]); });
     const txt = '﻿' + filas.map(f => f.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(';')).join('\r\n');
     const link = document.createElement('a'); link.href = URL.createObjectURL(new Blob([txt], { type: 'text/csv;charset=utf-8' })); link.download = `contactos-${hoyISO()}.csv`; link.click();
   }
@@ -1118,7 +1133,7 @@
     const banner = pend.length ? `<div class="alerta-llamar ${S.verPend ? 'abierta' : ''}">
       <button class="al-h" data-a="togglePend"><span class="al-ic">☎</span><span class="grow"><b>${pend.length === 1 ? 'Tenés 1 contacto para llamar' : `Tenés ${pend.length} contactos para llamar`}</b><small>${S.verPend ? 'Tocá para ocultar' : 'Tocá para ver la lista'}</small></span><span class="al-n">${pend.length}</span></button>
       ${S.verPend ? `<div class="al-lista">${pend.map(v => { const atraso = -proximoContacto(v); return `<div class="al-item">
-        <div class="grow"><b>${esc(v.propietario || 'Propietario')}</b> <span class="muted">· ${esc(v.calle)} ${v.altura ?? ''}</span>
+        <div class="grow"><b>${esc(v.propietario || 'Propietario')}</b> ${pillCalidad(v)} <span class="muted">· ${esc(v.calle)} ${v.altura ?? ''}</span>
           <div style="font-size:12px;color:var(--tx2)">${v.en_venta_colega ? `En venta con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ' · lleva ' + tiempoVenta(v.venta_desde) : ''}` : esc(v.resultado)}${atraso > 0 ? ` · <span style="color:var(--warn)">${atraso} ${atraso === 1 ? 'día' : 'días'} de atraso</span>` : ''}</div></div>
         <div class="al-acc">${v.telefono ? `<a class="btn sm" href="tel:${esc(v.telefono)}">📞 Llamar</a>` : ''}${btnWA(v)}<button class="btn sm primary" data-a="contactado" data-id="${v.id}">✓ Contactado</button></div></div>`; }).join('')}</div>` : ''}
     </div>` : '';
@@ -1126,6 +1141,7 @@
       ${tabsAsesor}
       ${vig.length > 1 ? `<div class="filters">${vig.map(x => `<button class="${x.id === a.id ? 'on' : ''}" data-asig="${x.id}">${esc(S.d.zonas.find(z => z.id === x.zona_id)?.nombre || 'Zona')}</button>`).join('')}</div>` : ''}
       ${banner}
+      ${puede ? '<button class="btn primary block carga-rapida" data-a="cargaRapida">＋ Cargar casa <small>elegí calle y altura, se ubica sola</small></button><button class="fab" data-a="cargaRapida" title="Cargar casa">＋</button>' : ''}
       ${sugerirInstalar() ? `<div class="card instalar-card"><div class="row" style="flex-wrap:nowrap;gap:12px"><img src="icono-192.png" alt="" width="44" height="44" style="border-radius:10px">
         <div class="grow" style="flex:1"><b>Instalá la app en tu celular</b><div class="muted" style="font-size:13px">Queda con ícono propio y funciona aunque te quedes sin señal en la calle.</div></div></div>
         <div class="row" style="margin-top:10px;justify-content:flex-end"><button class="btn sm ghost" data-a="ocultarInstalar">Ahora no</button><button class="btn sm primary" data-a="instalar">Instalar</button></div></div>` : ''}
@@ -1197,26 +1213,66 @@
           <div class="cuadra-h" data-cuadra="${cq.id}"><div class="tt"><b>${cq.desde != null ? `${cq.desde} – ${cq.hasta}` : `Cuadra ${cq.orden}`}${cq.aprox ? ' <small>aprox.</small>' : ''}${cq.mano ? ` <span class="mano">sólo mano ${cq.mano}</span>` : ''}</b><small>${esc(entreTxt(cq))}${(antPorCuadra.get(cq.id) || []).length ? ` · ${antPorCuadra.get(cq.id).length} de la gestión anterior` : ''}</small></div><span class="cnt ${vs.length ? 'on' : ''}">${vs.length}</span></div>
           <div class="cuadra-b">${vs.map(v => tarjetaVisita(v, { calle: cq.calle, puede })).join('')}
             ${(antPorCuadra.get(cq.id) || []).length ? `<div class="ant-h">De la gestión anterior (${antPorCuadra.get(cq.id).length})</div>${antPorCuadra.get(cq.id).map(v => tarjetaVisita(v, { calle: cq.calle, anterior: true, retomable: puede })).join('')}` : ''}
-            ${puede ? `<div class="vform" data-form="${cq.id}"><div class="grid2"><div><label class="f" style="margin-top:0">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" placeholder="${cq.desde != null ? cq.desde + '…' + cq.hasta : 'Número'}${cq.mano ? ' (' + cq.mano + ')' : ''}"></div>
-              <div><label class="f" style="margin-top:0">Resultado</label><select class="i" name="resultado"><option value="">—</option>${RESULTADOS.map(r => `<option>${r}</option>`).join('')}</select></div></div>
-              <label class="f">Propietario</label><input class="i" name="propietario" placeholder="Nombre y apellido" autocomplete="off">
-              <label class="f">Teléfono celular</label><input class="i" name="telefono" type="tel" inputmode="tel" placeholder="Ej: 11 6494 9902 · característica + número, sin 0 ni 15" autocomplete="off"><div class="telhint" data-telhint></div>
-              <label class="f">¿En venta con colega?</label>
-              <div class="sino"><label><input type="radio" name="colega_${cq.id}" value="no" data-colega checked><span>No</span></label><label><input type="radio" name="colega_${cq.id}" value="si" data-colega><span>Sí</span></label></div>
-              <div class="colega-campos hidden">
-                <label class="f">¿Hace cuánto está a la venta?</label>
-                <div class="row" style="flex-wrap:nowrap"><input class="i" name="venta_cant" type="number" min="0" inputmode="numeric" placeholder="Ej: 4" style="flex:1"><select class="i" name="venta_unidad" style="flex:1"><option value="30.44">meses</option><option value="1">días</option><option value="365.25">años</option></select></div>
-                <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" placeholder="Escribí el nombre de la firma colega" autocomplete="off">
-                <label class="f">Valor publicado (USD)</label><input class="i" name="venta_valor" type="number" min="0" inputmode="numeric" placeholder="Ej: 185000">
-              </div>
-              <label class="f">Notas</label><input class="i" name="notas" placeholder="Ej: PH al fondo, vende en 2027" autocomplete="off">
-              <label class="f">Fotos (hasta 3)</label>
-              <label class="btn sm fotobtn">📷 Agregar fotos<input type="file" accept="image/*" multiple data-fotos hidden></label>
-              <div class="fotos prev" data-prev></div>
-              <button class="btn primary block" style="margin-top:12px" data-a="addVisita" data-q="${cq.id}">Guardar casa</button></div>` : ''}</div></div>`; }).join('')}</details>`;
+            ${puede ? formCasa(cq.id, cq) : ''}</div></div>`; }).join('')}</details>`;
     }).join('') : `<p class="empty">${S.soloPend && !q ? '🎉 ¡Trabajaste todas las cuadras de tu zona!' : 'No hay calles que coincidan.'}</p>`;
     el.querySelectorAll('details.calle').forEach(d => d.addEventListener('toggle', () => { d.open ? S.abiertas.add(d.dataset.calle) : S.abiertas.delete(d.dataset.calle); }));
     cargarFotos(el);
+  }
+
+  // Formulario para cargar una casa. Con cq: dentro de una cuadra. Sin cq: carga rápida (elige calle y altura, el sistema ubica la cuadra)
+  function formCasa(fid, cq, rapida) {
+    const calles = rapida ? rapida.calles : [];
+    return `<div class="vform" data-form="${fid}" ${rapida ? 'data-rapida="1" style="border:0;padding:0"' : ''}>
+      ${rapida ? `<div class="grid2"><div><label class="f" style="margin-top:0">Calle</label><select class="i" name="calle">${calles.map(c => `<option ${c === rapida.calle ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+        <div><label class="f" style="margin-top:0">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" placeholder="Número"></div></div>
+        <label class="f">Cuadra</label><select class="i" name="cuadra"></select><div class="ubic" data-ubic></div>
+        <div class="grid2"><div style="grid-column:1/-1"><label class="f">Resultado</label><select class="i" name="resultado"><option value="">—</option>${RESULTADOS.map(r => `<option>${r}</option>`).join('')}</select></div></div>`
+      : `<div class="grid2"><div><label class="f" style="margin-top:0">Altura</label><input class="i" name="altura" type="number" inputmode="numeric" placeholder="${cq.desde != null ? cq.desde + '…' + cq.hasta : 'Número'}${cq.mano ? ' (' + cq.mano + ')' : ''}"></div>
+        <div><label class="f" style="margin-top:0">Resultado</label><select class="i" name="resultado"><option value="">—</option>${RESULTADOS.map(r => `<option>${r}</option>`).join('')}</select></div></div>`}
+      <label class="f">Propietario</label><input class="i" name="propietario" placeholder="Nombre y apellido" autocomplete="off">
+      <label class="f">Teléfono celular</label><input class="i" name="telefono" type="tel" inputmode="tel" placeholder="Ej: 11 6494 9902 · característica + número, sin 0 ni 15" autocomplete="off"><div class="telhint" data-telhint></div>
+      <label class="f">¿En venta con colega?</label>
+      <div class="sino"><label><input type="radio" name="colega_${fid}" value="no" data-colega checked><span>No</span></label><label><input type="radio" name="colega_${fid}" value="si" data-colega><span>Sí</span></label></div>
+      <div class="colega-campos hidden">
+        <label class="f">¿Hace cuánto está a la venta?</label>
+        <div class="row" style="flex-wrap:nowrap"><input class="i" name="venta_cant" type="number" min="0" inputmode="numeric" placeholder="Ej: 4" style="flex:1"><select class="i" name="venta_unidad" style="flex:1"><option value="30.44">meses</option><option value="1">días</option><option value="365.25">años</option></select></div>
+        <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" placeholder="Escribí el nombre de la firma colega" autocomplete="off">
+        <label class="f">Valor publicado (USD)</label><input class="i" name="venta_valor" type="number" min="0" inputmode="numeric" placeholder="Ej: 185000">
+      </div>
+      ${bloqueCalidad(fid)}
+      <label class="f">Notas</label><input class="i" name="notas" placeholder="Ej: PH al fondo, vende en 2027" autocomplete="off">
+      <label class="f">Fotos (hasta 3)</label>
+      <label class="btn sm fotobtn">📷 Agregar fotos<input type="file" accept="image/*" multiple data-fotos hidden></label>
+      <div class="fotos prev" data-prev></div>
+      ${rapida ? `<div class="row" style="margin-top:14px;flex-wrap:nowrap"><button class="btn grow" data-a="addVisita" data-otra="1" style="flex:1">Guardar y cargar otra</button><button class="btn primary grow" data-a="addVisita" style="flex:1">Guardar</button></div>
+        <button class="btn ghost block sm" style="margin-top:8px" data-a="cerrarModal">Cancelar</button>`
+      : `<button class="btn primary block" style="margin-top:12px" data-a="addVisita" data-q="${cq.id}">Guardar casa</button>`}</div>`;
+  }
+  // ---------- Carga rápida ----------
+  function zonaActualAsesor() { const a = S.d.asignaciones.find(x => x.id === S.asigSel); return a ? { a, z: S.d.zonas.find(x => x.id === a.zona_id) } : {}; }
+  function modalCargaRapida() {
+    const { z } = zonaActualAsesor(); if (!z) return;
+    const calles = [...new Set((z.cuadras || []).map(q => q.calle))].sort((a, b) => a.localeCompare(b, 'es'));
+    const calle = calles.includes(S.ultimaCalle) ? S.ultimaCalle : calles[0];
+    modal(`<h3>Cargar casa</h3><p class="muted" style="margin:0 0 8px;font-size:13px">Elegí la calle por la que vas caminando y la altura: la casa se guarda sola en su cuadra.</p>${formCasa('rapida', null, { calles, calle })}`);
+    opcionesCuadra($('#modalCard [data-form=rapida]'));
+  }
+  function opcionesCuadra(form) {
+    const { z } = zonaActualAsesor(); const calle = form.querySelector('[name=calle]').value; S.ultimaCalle = calle;
+    const qs = (z.cuadras || []).filter(q => q.calle === calle).sort((a, b) => ((a.desde ?? 1e9) - (b.desde ?? 1e9)) || (a.orden - b.orden));
+    form.querySelector('[name=cuadra]').innerHTML = `<option value="">— Se elige sola con la altura —</option>` + qs.map(q => `<option value="${q.id}">${esc(etiquetaCuadra(q))}${q.entre && q.entre.filter(Boolean).length === 2 ? ` · e/ ${esc(q.entre[0])} y ${esc(q.entre[1])}` : ''}${q.mano ? ` · mano ${q.mano}` : ''}</option>`).join('');
+    ubicarAltura(form);
+  }
+  function ubicarAltura(form) {
+    const { z } = zonaActualAsesor(); const calle = form.querySelector('[name=calle]').value;
+    const alt = parseInt(form.querySelector('[name=altura]').value, 10); const sel = form.querySelector('[name=cuadra]'); const hint = form.querySelector('[data-ubic]');
+    if (!alt) { hint.innerHTML = ''; return; }
+    const q = (z.cuadras || []).find(x => x.calle === calle && x.desde != null && alt >= x.desde && alt <= x.hasta);
+    if (q) {
+      sel.value = q.id;
+      const otraMano = q.mano && (alt % 2 === 0 ? 'par' : 'impar') !== q.mano;
+      hint.innerHTML = otraMano ? `<span class="mal">⚠ ${alt} es mano ${q.mano === 'par' ? 'impar' : 'par'}: esa vereda es de la zona vecina</span>` : `<span class="ok">📍 Va a ${esc(calle)} ${esc(etiquetaCuadra(q))}${q.entre && q.entre.filter(Boolean).length === 2 ? ` (entre ${esc(q.entre[0])} y ${esc(q.entre[1])})` : ''}</span>`;
+    } else { sel.value = ''; hint.innerHTML = '<span class="mal">⚠ Esa altura no coincide con ninguna cuadra de tu zona. Revisala o elegí la cuadra a mano.</span>'; }
   }
 
   function irACuadra(qid) {
@@ -1252,6 +1308,7 @@
           <label class="f">Inmobiliaria que la tiene</label><input class="i" name="venta_inmobiliaria" value="${esc(v.venta_inmobiliaria || '')}" placeholder="Escribí el nombre de la firma colega" autocomplete="off">
           <label class="f">Valor publicado (USD)</label><input class="i" name="venta_valor" type="number" min="0" inputmode="numeric" value="${v.venta_valor ?? ''}">
         </div>
+        ${bloqueCalidad('edit', v.calidad || '', v.resultado === 'Interesado en vender' || !!v.en_venta_colega)}
         <label class="f">Notas</label><input class="i" name="notas" value="${esc(v.notas || '')}" autocomplete="off">
         <label class="f">Fotos (hasta 3)</label>
         <div class="fotos" data-exist>${(v.fotos || []).map(f => `<span class="pv"><img data-foto="${esc(f)}" alt=""><button type="button" data-quitarexist="${esc(f)}">✕</button></span>`).join('')}</div>
@@ -1405,13 +1462,15 @@
       case 'delJornada': if (await confirmar('Borrar jornada', '¿Seguro?', 'Borrar', true)) { await conCarga(null, async () => { await S.be.borrar('jornadas', b.dataset.id); await refrescarAsesor(); }); } break;
       case 'verTodasJ': S.verTodasJ = true; renderAsesor(); break;
       case 'addVisita': {
-        const form = b.closest('[data-form]'); const qid = b.dataset.q;
+        const form = b.closest('[data-form]'); const rapida = !!form.dataset.rapida;
+        const qid = b.dataset.q || (form.querySelector('[name=cuadra]') || {}).value;
+        if (!qid) return toast('Elegí la cuadra (o revisá la altura)', true);
         const z = S.d.zonas.find(x => (x.cuadras || []).some(q => q.id === qid)); const q = z.cuadras.find(x => x.id === qid);
         const val = n => form.querySelector(`[name=${n}]`).value.trim();
         const altura = val('altura') ? parseInt(val('altura'), 10) : null;
         if (!altura && !val('propietario') && !val('telefono')) return toast('Cargá al menos la altura de la casa', true);
         if (altura && q.mano && (altura % 2 === 0 ? 'par' : 'impar') !== q.mano) {
-          if (!await confirmar('Vereda de la zona vecina', `En ${esc(q.calle)} tu zona trabaja sólo la <b>mano ${q.mano}</b>. El ${altura} está en la vereda de enfrente, que corresponde a la zona vecina. ¿Querés cargarla igual?`, 'Cargar igual')) return;
+          if (!await confirmar('Vereda de la zona vecina', `En ${esc(q.calle)} tu zona trabaja sólo la <b>mano ${q.mano}</b>. El ${altura} está en la vereda de enfrente, que corresponde a la zona vecina. ¿Querés cargarla igual?`, 'Cargar igual')) { if (rapida) modalCargaRapida(); return; }
         }
         const colega = form.querySelector('[data-colega]:checked')?.value === 'si';
         let venta = { en_venta_colega: false, venta_desde: null, venta_inmobiliaria: '', venta_valor: null };
@@ -1423,13 +1482,19 @@
           const d = new Date(Date.now() - dias * DIA); d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
           venta = { en_venta_colega: true, venta_desde: d.toISOString().slice(0, 10), venta_inmobiliaria: val('venta_inmobiliaria'), venta_valor: val('venta_valor') ? Number(val('venta_valor')) : null };
         }
+        const calidad = calidadElegida(form);
+        if (calidad === null) return toast('Elegí la calidad del contacto: caliente, tibio o frío', true);
         const archivos = (form._fotos || []).slice(0, 3);
         await conCarga(b, async () => {
           const fotos = [];
           for (const f of archivos) fotos.push(await S.be.subirFoto(await comprimir(f)));
-          await S.be.agregar('visitas', { asignacion_id: S.asigSel, cuadra_id: qid, calle: q.calle, altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), fecha: hoyISO(), ...venta, fotos });
+          await S.be.agregar('visitas', { asignacion_id: S.asigSel, cuadra_id: qid, calle: q.calle, altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), fecha: hoyISO(), ...venta, fotos, ...(calidad ? { calidad } : {}) });
           S.cuadraAbierta = qid; S.abiertas.add(q.calle);
-          toast(S.be.offline || !navigator.onLine ? 'Guardada en el celular · se sube sola cuando vuelva la señal' : 'Casa guardada'); await refrescarAsesor();
+          const offline = S.be.offline || !navigator.onLine;
+          toast(offline ? 'Guardada en el celular · se sube sola cuando vuelva la señal' : rapida ? `Guardada en ${q.calle} ${etiquetaCuadra(q)}` : 'Casa guardada');
+          if (rapida) cerrarModal();
+          await refrescarAsesor();
+          if (rapida && b.dataset.otra) modalCargaRapida();
         });
         break;
       }
@@ -1457,12 +1522,14 @@
           if (!sinCambio) { const d = new Date(Date.now() - Math.round(Number(val('venta_cant')) * Number(val('venta_unidad'))) * DIA); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); desde = d.toISOString().slice(0, 10); }
           venta = { en_venta_colega: true, venta_desde: desde, venta_inmobiliaria: val('venta_inmobiliaria'), venta_valor: val('venta_valor') ? Number(val('venta_valor')) : null };
         }
+        const calidad = calidadElegida(form);
+        if (calidad === null) return toast('Elegí la calidad del contacto: caliente, tibio o frío', true);
         const exist = form._exist || [], nuevas = (form._fotos || []).slice(0, Math.max(0, 3 - exist.length));
         const quitadas = (v.fotos || []).filter(f => !exist.includes(f));
         await conCarga(b, async () => {
           const fotos = [...exist];
           for (const f of nuevas) fotos.push(await S.be.subirFoto(await comprimir(f)));
-          await S.be.editar('visitas', v.id, { altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), ...venta, fotos });
+          await S.be.editar('visitas', v.id, { altura, propietario: val('propietario'), telefono: val('telefono'), resultado: val('resultado'), notas: val('notas'), ...venta, fotos, calidad: calidad || '' });
           if (quitadas.length) S.be.borrarFotos(quitadas);
           cerrarModal(); toast('Cambios guardados'); await refrescar();
         });
@@ -1491,7 +1558,8 @@
         });
         break;
       }
-      case 'contactado': await conCarga(b, async () => { await S.be.editar('visitas', b.dataset.id, { ultimo_contacto: hoyISO() }); toast(`Listo. Te recordamos de nuevo en ${SEGUIR_CADA} días`); await refrescarAsesor(); }); break;
+      case 'contactado': { const vv = S.d.visitas.find(x => x.id === b.dataset.id); await conCarga(b, async () => { await S.be.editar('visitas', b.dataset.id, { ultimo_contacto: hoyISO() }); toast(`Listo. Te recordamos de nuevo en ${vv ? intervaloLlamado(vv) : SEGUIR_CADA} días`); await refrescarAsesor(); }); break; }
+      case 'cargaRapida': modalCargaRapida(); break;
       case 'togglePend': S.verPend = !S.verPend; renderAsesor(); break;
       case 'soloPend': { S.soloPend = !S.soloPend; const a2 = S.d.asignaciones.find(x => x.id === S.asigSel); const z2 = S.d.zonas.find(x => x.id === a2.zona_id); b.classList.toggle('primary', S.soloPend); b.textContent = (S.soloPend ? '✓ ' : '') + 'Pendientes'; renderCalles(z2, a2); break; }
       case 'etapa': {
@@ -1514,6 +1582,7 @@
   });
   $('#modal').addEventListener('click', e => { if (e.target.id === 'modal') cerrarModal(); });
   document.addEventListener('input', e => {
+    if (e.target.matches('[data-form=rapida] [name=altura]')) ubicarAltura(e.target.closest('[data-form]'));
     if (e.target.matches('[data-form] [name=telefono]')) { const h = e.target.parentElement.querySelector('[data-telhint]'); if (h) h.innerHTML = telHint(e.target.value); }
   });
   document.addEventListener('change', e => {
@@ -1522,7 +1591,10 @@
     if (t.matches('[data-colega]')) {
       const form = t.closest('[data-form]');
       form.querySelector('.colega-campos').classList.toggle('hidden', t.value !== 'si');
+      actualizarCalidad(form);
     }
+    if (t.matches('[data-form] [name=resultado]')) actualizarCalidad(t.closest('[data-form]'));
+    if (t.matches('[data-form=rapida] [name=calle]')) opcionesCuadra(t.closest('[data-form]'));
     if (t.matches('[data-fotos]')) {
       const form = t.closest('[data-form]');
       const nuevas = [...t.files].filter(f => f.type.startsWith('image/'));

@@ -354,3 +354,24 @@ ol.pasos{padding-left:20px;line-height:1.7;margin:8px 0 12px}
 .nov.nueva{background:rgba(190,175,135,.06)}
 .nov.oport .nov-t b:last-of-type{color:var(--gold2)}
 .ase-nuevo{margin-top:8px;font-size:13px;font-weight:600;color:var(--gold);background:var(--golddim);border-radius:8px;padding:6px 10px}
+
+/* ---------- carga rápida y calidad ---------- */
+.carga-rapida{margin-bottom:12px;padding:14px;font-size:16px;display:flex;flex-direction:column;gap:2px}
+.carga-rapida small{font-weight:500;font-size:12px;opacity:.75}
+.fab{position:fixed;right:16px;bottom:calc(20px + var(--safe-b));z-index:900;width:58px;height:58px;border-radius:50%;border:0;background:var(--gold);color:var(--bg);font-size:30px;font-weight:700;box-shadow:0 8px 22px rgba(0,0,0,.5);cursor:pointer;line-height:1}
+.ubic{font-size:13px;margin-top:6px}
+.ubic .ok{color:var(--ok)} .ubic .mal{color:var(--warn)}
+.calidad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.calidad label{cursor:pointer}
+.calidad input{position:absolute;opacity:0;pointer-events:none}
+.calidad span{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 4px;border:1px solid var(--line2);border-radius:10px;background:var(--bg2);font-weight:700;font-size:14px;color:var(--tx2);text-align:center}
+.calidad span small{font-weight:500;font-size:10px;color:var(--tx3)}
+.calidad input[value=caliente]:checked + span{border-color:#E0524A;background:rgba(224,82,74,.15);color:#F2A49F}
+.calidad input[value=tibio]:checked + span{border-color:#E9B44C;background:rgba(233,180,76,.15);color:#F2D08F}
+.calidad input[value=frio]:checked + span{border-color:#5B8DEF;background:rgba(91,141,239,.15);color:#A9C3F7}
+.cal{font-size:11px;font-weight:800;padding:2px 7px;border-radius:10px;margin-left:6px;white-space:nowrap;vertical-align:middle}
+.cal-caliente{background:rgba(224,82,74,.18);color:#F2A49F}
+.cal-tibio{background:rgba(233,180,76,.18);color:#F2D08F}
+.cal-frio{background:rgba(91,141,239,.18);color:#A9C3F7}
+.pop .cal-caliente{color:#b3261e} .pop .cal-tibio{color:#8a5a00} .pop .cal-frio{color:#1f4fbf}
+.modal-card .vform .grid2{gap:10px}
