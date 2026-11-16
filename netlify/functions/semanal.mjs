@@ -35,7 +35,7 @@ export async function armarResumen() {
   const [zonas, perfiles, visitas, jornadas] = await Promise.all([
     sb(`/rest/v1/zonas?id=in.${inList(asigs.map(a => a.zona_id))}&select=id,nombre,cuadras`),
     sb(`/rest/v1/perfiles?id=in.${inList(asigs.map(a => a.asesor_id))}&select=id,nombre,apellido`),
-    sbTodo(`/rest/v1/visitas?asignacion_id=in.${ids}&select=asignacion_id,cuadra_id,telefono,resultado,en_venta_colega,etapa,tasacion_fecha,captacion_fecha,fecha,ultimo_contacto,creado`),
+    sbTodo(`/rest/v1/visitas?asignacion_id=in.${ids}&select=asignacion_id,cuadra_id,telefono,resultado,calidad,en_venta_colega,etapa,tasacion_fecha,captacion_fecha,fecha,ultimo_contacto,creado`),
     sbTodo(`/rest/v1/jornadas?asignacion_id=in.${ids}&select=asignacion_id,horas,fecha,creado`),
   ]);
 
@@ -51,7 +51,7 @@ export async function armarResumen() {
     const tot = cuadrasZona.size;
     const ult = [a.inicio, ...v.map(x => x.creado), ...j.map(x => x.creado)].filter(Boolean).sort().pop();
     const pend = v.filter(x => x.etapa !== 'captacion' && (x.resultado === 'Interesado en vender' || x.en_venta_colega || x.etapa === 'tasacion')
-      && dias([x.fecha, x.ultimo_contacto].filter(Boolean).sort().pop()) >= SEGUIR_CADA).length;
+      && dias([x.fecha, x.ultimo_contacto].filter(Boolean).sort().pop()) >= ({ caliente: 5, tibio: 7, frio: 15 }[x.calidad] || SEGUIR_CADA)).length;
     return {
       asesor: `${p.nombre || ''} ${p.apellido || ''}`.trim() || '—', zona: z.nombre || '—', vence: a.vence,
       estado: a.estado === 'vencida' || new Date(a.vence) <= ahora ? 'vencida' : 'activa',

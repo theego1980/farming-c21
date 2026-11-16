@@ -7,6 +7,9 @@ import { sb, plantilla, enviarMail, fechaLarga, esc, adminEmail, siteUrl } from 
 
 const DIA = 864e5;
 const SEGUIR_CADA = 15;
+// Calidad del contacto → cada cuántos días se recuerda llamarlo
+const CALIDAD = { caliente: ['🔥 Caliente', 5], tibio: ['🌤 Tibio', 7], frio: ['❄️ Frío', 15] };
+const intervalo = v => (CALIDAD[v.calidad] || [null, SEGUIR_CADA])[1];
 const INACTIVIDAD = 7;
 
 async function sbTodo(path) {
@@ -159,7 +162,7 @@ async function seguimiento(url) {
   const filtro = encodeURIComponent('(resultado.eq."Interesado en vender",en_venta_colega.is.true,etapa.eq.tasacion)');
   const vis = (await sbTodo(`/rest/v1/visitas?asignacion_id=in.${inList(asigs.map(a => a.id))}&or=${filtro}&select=*`))
     .filter(v => v.etapa !== 'captacion');
-  const toca = vis.filter(v => dias([v.fecha, v.ultimo_contacto, v.recordado].filter(Boolean).sort().pop()) >= SEGUIR_CADA);
+  const toca = vis.filter(v => dias([v.fecha, v.ultimo_contacto, v.recordado].filter(Boolean).sort().pop()) >= intervalo(v));
   if (!toca.length) return 'seguimiento: nada';
   const perfiles = await sb(`/rest/v1/perfiles?id=in.${inList(toca.map(v => v.asesor_id))}&select=id,nombre,email`);
   const porAsesor = new Map();
@@ -167,7 +170,7 @@ async function seguimiento(url) {
   for (const [aid, vs] of porAsesor) {
     const p = perfiles.find(x => x.id === aid); if (!p) continue;
     const filas = vs.map(v => `<tr><td style="padding:10px 8px;border-bottom:1px solid #2A2824">
-<b style="color:#fff">${esc(v.calle)} ${v.altura ?? ''}</b><br>
+<b style="color:#fff">${esc(v.calle)} ${v.altura ?? ''}</b>${CALIDAD[v.calidad] ? ` <span style="font-size:12px;color:#BEAF87">· ${CALIDAD[v.calidad][0]}</span>` : ''}<br>
 <span style="font-size:14px">${esc(v.propietario || 'Propietario sin nombre')}${v.telefono ? ` · <a href="tel:${esc(v.telefono)}" style="color:#BEAF87">${esc(v.telefono)}</a>` : ''}</span><br>
 <span style="font-size:12px;color:#8C877C">${v.etapa === 'tasacion' ? 'Tasación hecha · ' : ''}${v.en_venta_colega ? `En venta con ${esc(v.venta_inmobiliaria || 'colega')}${v.venta_valor ? ' · ' + usd(v.venta_valor) : ''}${v.venta_desde ? ` · lleva ${tiempo(v.venta_desde)}` : ''}` : esc(v.resultado)}
  · ${v.ultimo_contacto ? `último contacto hace ${dias(v.ultimo_contacto)} días` : `visitada hace ${dias(v.fecha)} días`}</span></td></tr>`).join('');
@@ -176,9 +179,9 @@ async function seguimiento(url) {
       subject: `☎ ${vs.length === 1 ? 'Tenés 1 contacto' : `Tenés ${vs.length} contactos`} para llamar`,
       html: plantilla('Contactos para llamar', `
 <p>Hola ${esc(p.nombre)},</p>
-<p>Estos propietarios quieren vender o tienen su propiedad a la venta con otra inmobiliaria, y pasaron ${SEGUIR_CADA} días o más desde el último contacto:</p>
+<p>Estos propietarios quieren vender o tienen su propiedad a la venta con otra inmobiliaria, y ya toca volver a llamarlos:</p>
 <table width="100%" cellspacing="0" cellpadding="0">${filas}</table>
-<p style="font-size:14px;color:#8C877C;margin-top:14px">Cuando hables con cada uno, tocá <b>✓ Contactado</b> en tu panel. Te lo volvemos a recordar en ${SEGUIR_CADA} días.</p>`,
+<p style="font-size:14px;color:#8C877C;margin-top:14px">Cuando hables con cada uno, tocá <b>✓ Contactado</b> en tu panel. Te lo volvemos a recordar según la calidad del contacto: 🔥 caliente a los 5 días, 🌤 tibio a los 7 y ❄️ frío a los 15.</p>`,
         { href: url, texto: 'Abrir mi panel' }),
       text: vs.map(v => `${v.calle} ${v.altura ?? ''} — ${v.propietario} ${v.telefono}`).join('\n') + `\n${url}`,
     });
